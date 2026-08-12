@@ -4,20 +4,19 @@ updates:
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     groups:
-      python-minor-and-patch:
+      python-security:
+        applies-to: security-updates
         patterns:
           - "*"
-        update-types:
-          - minor
-          - patch
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     groups:
-      github-actions:
+      github-actions-security:
+        applies-to: security-updates
         patterns:
           - "*"
