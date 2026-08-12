@@ -134,7 +134,7 @@ export default function DemoPage() {
         <section className="privacy-banner" aria-label="Demo privacy statement">
           <strong>SAFE DEMO</strong>
           <span>Every account, symbol, price and event below is fabricated in source code.</span>
-          <span>No network data · No cookies · No storage</span>
+          <span>No live data APIs · No app cookies · No storage</span>
         </section>
 
         <section className="scenario-control" aria-label="Portfolio scenario">

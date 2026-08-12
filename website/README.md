@@ -4,8 +4,9 @@ The public website for **Personal Trading Decision System (IBKR)**. It includes
 an interactive demonstration built exclusively from fabricated `SIM-*` data.
 
 The site does not connect to IBKR, call the project API, write a database, use
-browser storage, or set cookies. Editing a scenario only changes in-memory React
-state for the current page.
+browser storage, or set application cookies. Editing a scenario only changes
+in-memory React state for the current page. The hosting provider may set strictly
+technical security cookies at the network edge.
 
 ## Prerequisites
 

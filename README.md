@@ -3,6 +3,8 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/datazhy/ibkr-trading-decision-system/actions/workflows/ci.yml/badge.svg)](https://github.com/datazhy/ibkr-trading-decision-system/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/datazhy/ibkr-trading-decision-system)](https://github.com/datazhy/ibkr-trading-decision-system/releases)
+[![Public Demo](https://img.shields.io/badge/Public-Synthetic_Demo-B8F34A)](https://ibkr-trading-decision-system.datazhy.chatgpt.site/demo)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688?logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
@@ -10,6 +12,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A self-hosted decision-support, risk-control, and review system for individual US equity investors. The application UI is currently Chinese and is branded **Xiaoyu Trading Desk**.
+
+**[Project website](https://ibkr-trading-decision-system.datazhy.chatgpt.site)** · **[Synthetic public demo](https://ibkr-trading-decision-system.datazhy.chatgpt.site/demo)**
+
+> [!NOTE]
+> The public demo uses source-embedded, fabricated `SIM-*` portfolios. It does not connect to IBKR or any project API, and it has no application database or browser storage.
 
 The system reads account, position, execution, and PnL data from Interactive Brokers, combines it with market context, technical signals, risk rules, and personal trade plans, and produces an auditable workflow:
 
@@ -143,6 +150,7 @@ Only a validated and manually approved `ACTIVE` version may monotonically tighte
 |---|---|
 | Backend | Python 3.11+, FastAPI, APScheduler, ib_async |
 | Frontend | Jinja2, HTMX, native CSS and JavaScript |
+| Public website | React 19, vinext and Cloudflare Workers; synthetic data only |
 | Storage | SQLite, WAL, Fernet encryption, gzip online backups |
 | Data | IBKR, optional Futu OpenD, optional Flex Query, optional Hyperliquid |
 | Notifications | Apprise and optional dead-man's-switch heartbeat |
@@ -263,6 +271,7 @@ FastAPI documentation is available at `/docs`. When dashboard authentication is 
 ├── docs/
 ├── scripts/
 ├── tests/
+├── website/                     # Public website and isolated synthetic demo
 ├── docker-compose.yml
 ├── manage.py
 └── requirements.txt
@@ -275,6 +284,7 @@ python -m pytest -q
 python scripts/check_repository_hygiene.py
 docker compose config >/dev/null
 PYTHONPATH=. python scripts/deploy_preflight.py --mode shadow
+cd website && npm ci && npm test && npm run lint
 ```
 
 The suite focuses on calculation semantics, broker read-only boundaries, market sessions, data quality, recommendation provenance, portfolio construction, replay isolation, pages, backups, and validation gates.
@@ -294,6 +304,8 @@ The repository ignores these paths by default. Before publishing a fork, scan bo
 - [Documentation index](docs/README.md)
 - [Architecture and safety model](docs/architecture.md)
 - [Deployment guide](docs/deployment.md)
+- [Changelog](CHANGELOG.md)
+- [Public website source](website/README.md)
 - [简体中文 README](README.zh-CN.md)
 - [中文文档索引](docs/zh-CN/README.md)
 

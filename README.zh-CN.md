@@ -3,6 +3,8 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/datazhy/ibkr-trading-decision-system/actions/workflows/ci.yml/badge.svg)](https://github.com/datazhy/ibkr-trading-decision-system/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/datazhy/ibkr-trading-decision-system)](https://github.com/datazhy/ibkr-trading-decision-system/releases)
+[![公开 Demo](https://img.shields.io/badge/公开-合成数据_Demo-B8F34A)](https://ibkr-trading-decision-system.datazhy.chatgpt.site/demo)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688?logo=fastapi&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
@@ -10,6 +12,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 自托管、面向个人投资者的美股交易决策、风险控制与复盘系统（界面名称：**小鱼交易台**）。
+
+**[项目官网](https://ibkr-trading-decision-system.datazhy.chatgpt.site)** · **[合成数据公开 Demo](https://ibkr-trading-decision-system.datazhy.chatgpt.site/demo)**
+
+> [!NOTE]
+> 公开 Demo 只使用写在源码中的 `SIM-*` 虚构组合，不连接 IBKR 或项目 API，也不使用应用数据库和浏览器存储。
 
 系统从 IBKR 读取账户、持仓、成交与盈亏数据，结合行情、技术指标、风险规则和个人交易计划，形成一条可审计的决策链：
 
@@ -156,6 +163,7 @@ HL_SWING_INFLUENCE_ENABLED=false
 |---|---|
 | 后端 | Python 3.11+、FastAPI、APScheduler、ib_async |
 | 前端 | Jinja2、HTMX、原生 CSS / JavaScript |
+| 公开官网 | React 19、vinext、Cloudflare Workers；只使用合成数据 |
 | 数据 | SQLite、WAL、Fernet 加密、gzip 热备份 |
 | 行情与外部数据 | IBKR、Futu OpenD（可选）、Flex Query（可选）、Hyperliquid（可选） |
 | 通知 | Apprise（飞书等渠道）与 healthchecks.io 心跳 |
@@ -306,6 +314,7 @@ JSON API 统一位于 `/api/v1`，主要覆盖：
 ├── docs/                         # 设计、审计和部署文档
 ├── scripts/                      # 备份、watchdog、预检与质量报告
 ├── tests/                        # 单元、集成与回归测试
+├── website/                      # 项目官网与隔离的合成数据 Demo
 ├── docker-compose.yml
 ├── manage.py
 └── requirements.txt
@@ -318,6 +327,7 @@ JSON API 统一位于 `/api/v1`，主要覆盖：
 ```bash
 python -m pytest -q
 python scripts/check_repository_hygiene.py
+cd website && npm ci && npm test && npm run lint
 ```
 
 Docker 配置与部署预检：
@@ -357,6 +367,8 @@ watchdog 安装说明见 [deploy/risk-watchdog.timer](deploy/risk-watchdog.timer
 - [架构与安全模型](docs/zh-CN/architecture.md)
 - [部署指南](docs/zh-CN/deployment.md)
 - [英文文档索引](docs/README.md)
+- [更新日志](CHANGELOG.zh-CN.md)
+- [公开官网源码](website/README.md)
 
 ## 隐私与安全
 

@@ -43,10 +43,12 @@ test("server-renders a privacy-safe synthetic demo", async () => {
   const html = await response.text();
   assert.match(html, /Synthetic data only/);
   assert.match(html, /Every account, symbol, price and event below is fabricated/);
-  assert.match(html, /No network data/);
+  assert.match(html, /No live data APIs/);
   assert.match(html, /SIM-A/);
   assert.match(html, /Manual review required before any broker action/);
   assert.doesNotMatch(html, /placeOrder|reqAccountUpdates|accountId|TOTP|token/i);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
 });
 
 test("keeps the public site free of template and persistence features", async () => {
