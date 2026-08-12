@@ -22,6 +22,13 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
@@ -30,6 +37,14 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest -q
+
+      - name: Install website dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Test and lint website
+        working-directory: website
+        run: npm test && npm run lint
 
       - name: Check Docker Compose configuration
         run: |
