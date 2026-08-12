@@ -1,0 +1,436 @@
+{% extends "base.html" %}
+{% block title %}每日简报 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set d = data %}
+<style>
+  .brief-mobile-section{display:none}
+  .brief-change-list{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .brief-change-row{display:grid;grid-template-columns:112px 52px minmax(0,1fr);
+    align-items:start;border-bottom:1px solid var(--line)}
+  .brief-change-row:last-child{border-bottom:0}
+  .brief-change-label,.brief-change-count,.brief-change-content{padding:9px}
+  .brief-change-label{font-weight:700}
+  .brief-change-count{text-align:right;font-variant-numeric:tabular-nums}
+  .brief-change-content{min-width:0;line-height:1.7;overflow-wrap:anywhere;word-break:break-word}
+  .brief-change-items{margin:0;padding-left:18px}
+  .brief-change-items li+li{margin-top:4px}
+  @media(max-width:768px){
+    .brief-change-list{border:0;border-radius:0}
+    .brief-change-row{grid-template-columns:minmax(0,1fr) auto;padding:10px 0}
+    .brief-change-label,.brief-change-count{padding:0}
+    .brief-change-count{padding-left:12px;color:var(--muted)}
+    .brief-change-content{grid-column:1/-1;padding:7px 0 0;text-align:left}
+    .brief-change-items{padding-left:20px}
+    main>table{display:block;max-width:100%;overflow-x:auto}
+    .brief-mobile-section{display:block;border:1px solid var(--line);border-radius:11px;
+      background:var(--panel);margin:10px 0}
+    .brief-mobile-section>summary{min-height:52px;padding:0 12px;display:flex;
+      align-items:center;font-weight:700;cursor:pointer}
+    .brief-mobile-section>.brief-section-body{padding:0 12px 12px}
+    .brief-section-body .mobile-card-list{margin-top:8px}
+  }
+</style>
+
+<h1>每日风险简报</h1>
+
+<div style="border:1px solid var(--line);border-left:3px solid var(--muted);
+  border-radius:8px;padding:10px 14px;margin:0 0 16px;font-size:12px;
+  line-height:1.7;background:var(--panel);color:var(--muted)">
+  {{ d.disclaimer }}
+  简报中的所有数字均由系统结构化计算得出，AI（若启用）只负责组织语言，
+  <b>不参与任何指标计算</b>。每个关键数字的来源可在下方「数据来源」中查看。
+</div>
+
+{% if not d.available %}
+  <p class="muted">{{ d.note }}</p>
+{% else %}
+
+{% if d.history %}
+<form class="mobile-only panel" method="get" style="margin-bottom:12px">
+  <label>当前简报
+    <select name="brief" onchange="this.form.submit()" style="width:100%">
+      {% for b in d.history %}<option value="{{ b.brief_id }}" {{ 'selected' if b.brief_id == d.brief_id }}>{{ b.brief_date }} · v{{ b.revision }}</option>{% endfor %}
+    </select>
+  </label>
+</form>
+{% endif %}
+
+{# ==================== 版本与生成方式 ==================== #}
+<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+  <span class="pill {{ d.status_css }}"><b>{{ d.status_label }}</b></span>
+  <span class="pill {{ d.mode_css }}">模式：{{ d.mode_label }}</span>
+  <span class="pill {{ 'ok' if d.validation_status=='passed' else 'crit' }}">
+    校验：{{ '通过' if d.validation_status=='passed' else '未通过' }}</span>
+  <span class="muted" style="font-size:12px">
+    {{ d.brief_date }} · 第 {{ d.revision }} 版 ·
+    生成于 {{ d.generated_at_abs }}
+    {% if d.delivered_at_abs %} · 已推送 {{ d.delivered_at_abs }}{% endif %}
+  </span>
+</div>
+
+{% if d.validation_errors %}
+<div style="border:1px solid var(--crit);border-radius:8px;padding:10px 14px;
+  margin-bottom:14px;font-size:12px;line-height:1.7">
+  <b style="color:var(--crit)">本份简报未通过输出校验，已阻止推送。</b>
+  <ul style="margin:6px 0 0;padding-left:20px">
+    {% for e in d.validation_errors[:10] %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if d.is_blocked %}
+<div style="border:1px solid var(--crit);border-left:4px solid var(--crit);
+  border-radius:8px;padding:12px 16px;margin-bottom:16px;line-height:1.8">
+  <b style="color:var(--crit)">⛔ 数据受阻简报</b><br>
+  <span class="muted" style="font-size:12px">
+    核心账户数据不可用，本次<b>不给出任何账户风险结论</b>。
+    把一次数据故障显示成「低风险」，是本系统最不能犯的错误 ——
+    因此这里宁可什么都不说。
+  </span>
+</div>
+{% elif not d.is_ai %}
+<div style="border:1px solid var(--warn);border-left:4px solid var(--warn);
+  border-radius:8px;padding:12px 16px;margin-bottom:16px;line-height:1.8">
+  <b>模板降级</b> —— 本份简报未经过 AI，由确定性模板直接使用结构化数据生成。
+  <span class="muted" style="font-size:12px">
+    AI 服务不可用不会导致当天没有简报；模板版本的数字与 AI 版本完全一致。
+  </span>
+</div>
+{% endif %}
+
+{% set c = d.content %}
+
+{# ==================== 一、今日结论 ==================== #}
+<h2>今日结论</h2>
+<p style="font-size:15px;line-height:1.8"><b>{{ c.headline }}</b></p>
+<ul style="line-height:1.9">
+  {% for s in c.executive_summary %}<li>{{ clean_decimals(s) }}</li>{% endfor %}
+</ul>
+
+{# ==================== 二、账户与市场 ==================== #}
+<h2>账户风险与市场风险</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
+  <div class="card">
+    <h3 style="margin-top:0">账户</h3>
+    <dl class="kv">
+      <div><dt>风险等级</dt><dd><b>{{ c.account_summary.risk_level or '无数据' }}</b></dd></div>
+      <div><dt>风险评分</dt><dd>{{ num(c.account_summary.risk_score) if c.account_summary.risk_score is not none else '无数据' }}</dd></div>
+      <div><dt>净资产</dt><dd>{{ money(c.account_summary.net_liquidation) if c.account_summary.net_liquidation is not none else '无数据' }}</dd></div>
+      <div><dt>总现金</dt><dd>{{ money(c.account_summary.total_cash) if c.account_summary.total_cash is not none else '无数据' }}</dd></div>
+      <div><dt>现金比例</dt><dd>{{ pct(c.account_summary.cash_ratio) if c.account_summary.cash_ratio is not none else '无数据' }}</dd></div>
+      <div><dt>持仓总市值</dt><dd>{{ money(c.account_summary.positions_market_value) if c.account_summary.positions_market_value is not none else '无数据' }}</dd></div>
+      <div><dt>口径</dt><dd style="font-size:11px">{{ c.account_summary.exposure_basis or '未标注' }}</dd></div>
+      <div><dt>多头敞口</dt><dd>{{ money(c.account_summary.long_exposure) if c.account_summary.long_exposure is not none else '无数据' }}</dd></div>
+      <div><dt>空头敞口</dt><dd>{{ money(c.account_summary.short_exposure) if c.account_summary.short_exposure is not none else '无数据' }}</dd></div>
+      <div><dt>总风险敞口</dt><dd>{{ money(c.account_summary.gross_exposure) if c.account_summary.gross_exposure is not none else '无数据' }}</dd></div>
+      <div><dt>总杠杆</dt><dd>{{ num(c.account_summary.gross_leverage) if c.account_summary.gross_leverage is not none else '无数据' }}</dd></div>
+      <div><dt>当前回撤</dt><dd>{{ pct(c.account_summary.current_drawdown) if c.account_summary.current_drawdown is not none else '无数据' }}</dd></div>
+      <div><dt>数据截至</dt><dd>{{ c.account_summary.data_as_of or '无数据' }}</dd></div>
+    </dl>
+    {% if c.account_summary.narrative %}
+      <p class="muted" style="font-size:12px">{{ clean_decimals(c.account_summary.narrative) }}</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">市场环境</h3>
+    <dl class="kv">
+      <div><dt>市场状态</dt><dd><b>{{ c.market_summary.market_state or '无数据' }}</b></dd></div>
+      <div><dt>风险等级</dt><dd>{{ c.market_summary.risk_level or '无数据' }}</dd></div>
+      <div><dt>风险评分</dt><dd>{{ num(c.market_summary.risk_score) if c.market_summary.risk_score is not none else '无数据' }}</dd></div>
+      <div><dt>QQQ</dt><dd>{{ num(c.market_summary.qqq_close) if c.market_summary.qqq_close is not none else '无数据' }}</dd></div>
+      <div><dt>QQQ 均线状态</dt><dd style="font-size:11px">{{ c.market_summary.qqq_trend or '无数据' }}</dd></div>
+      <div><dt>SOXX</dt><dd>{{ num(c.market_summary.soxx_close) if c.market_summary.soxx_close is not none else '无数据' }}</dd></div>
+      <div><dt>SOXX 均线状态</dt><dd style="font-size:11px">{{ c.market_summary.soxx_trend or '无数据' }}</dd></div>
+      <div><dt>SOXX 相对 QQQ 20 日</dt><dd>{{ num(c.market_summary.soxx_vs_qqq_20d) if c.market_summary.soxx_vs_qqq_20d is not none else '无数据' }}</dd></div>
+      <div><dt>VIX</dt><dd>{{ num(c.market_summary.vix) if c.market_summary.vix is not none else '无数据' }}
+        <span class="muted" style="font-size:11px">（1 日 {{ num(c.market_summary.vix_change_1d) if c.market_summary.vix_change_1d is not none else '—' }} · 5 日 {{ num(c.market_summary.vix_change_5d) if c.market_summary.vix_change_5d is not none else '—' }}）</span></dd></div>
+      <div><dt>VXN</dt><dd>{{ num(c.market_summary.vxn) if c.market_summary.vxn is not none else '无数据' }}
+        <span class="muted" style="font-size:11px">（高出 VIX {{ num(c.market_summary.vxn_above_vix) if c.market_summary.vxn_above_vix is not none else '—' }}）</span></dd></div>
+      <div><dt>十年期美债</dt><dd>{{ '%.3f%%' % (((c.market_summary.us10y|float) / 10) if (c.market_summary.us10y|float)|abs > 10 else (c.market_summary.us10y|float)) if c.market_summary.us10y is not none else '无数据' }}
+        <span class="muted" style="font-size:11px">（5 日 {{ '%.3f 个百分点' % (((c.market_summary.us10y_change_5d|float) / 10) if (c.market_summary.us10y_change_5d|float)|abs > 10 else (c.market_summary.us10y_change_5d|float)) if c.market_summary.us10y_change_5d is not none else '—' }}）</span></dd></div>
+      {% if c.market_summary.instrument_data_as_of %}
+      <div><dt>各标的数据时间</dt><dd style="font-size:11px">
+        {% for k, v in c.market_summary.instrument_data_as_of.items() %}{{ k|upper }} {{ (v or '无')[:10] }}{% if not loop.last %} · {% endif %}{% endfor %}
+      </dd></div>
+      {% endif %}
+      <div><dt>数据截至</dt><dd>{{ c.market_summary.data_as_of or '无数据' }}</dd></div>
+    </dl>
+    {% if c.market_summary.narrative %}
+      <p class="muted" style="font-size:12px">{{ clean_decimals(c.market_summary.narrative) }}</p>
+    {% endif %}
+  </div>
+</div>
+
+{# ==================== 三、风险变化 ==================== #}
+<h2>风险变化</h2>
+<p class="muted" style="font-size:12px">
+  简报只突出<b>今天变了什么</b>。持续多日且数值变化不大的事件已合并说明。
+</p>
+<div class="brief-change-list">
+  {% for key, label in [('escalated','严重度升级'),('new','今日新增'),
+                        ('resolved','今日恢复'),('persistent','持续存在'),
+                        ('acknowledged','已确认'),('suppressed','被抑制')] %}
+  {% set items = c.risk_changes.get(key) or [] %}
+  <div class="brief-change-row">
+    <div class="brief-change-label">{{ label }}</div>
+    <div class="brief-change-count">{{ items | length }}</div>
+    <div class="brief-change-content">
+      {% if items %}
+      <ul class="brief-change-items">
+        {% for i in items %}<li>{{ clean_decimals(i) }}</li>{% endfor %}
+      </ul>
+      {% else %}<span class="muted">无</span>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{# ==================== 四、最大风险来源 ==================== #}
+<h2>最大风险来源</h2>
+{% if c.top_risks %}
+  {% for t in c.top_risks %}
+  <div class="card" style="margin-bottom:10px">
+    <b>{{ t.title }}</b>
+    <span class="pill {{ 'crit' if t.severity=='critical' else ('warn' if t.severity in ('high','warning') else '') }}">{{ t.severity or '—' }}</span>
+    <dl class="kv" style="margin-top:8px">
+      <div><dt>当前值</dt><dd>{{ num(t.actual_value) if t.actual_value is not none else '无数据' }}</dd></div>
+      <div><dt>阈值</dt><dd>{{ num(t.threshold) if t.threshold is not none else '无数据' }}</dd></div>
+      <div><dt>影响对象</dt><dd>{{ t.affected_object or '账户整体' }}</dd></div>
+      <div><dt>规则</dt><dd>{{ t.rule_code or '—' }}</dd></div>
+      <div><dt>规则版本</dt><dd>{{ t.rule_version or '—' }}</dd></div>
+    </dl>
+    <p style="margin:6px 0 0">{{ clean_decimals(t.explanation) }}</p>
+    <p style="margin:4px 0 0"><b>建议检查：</b>{{ clean_decimals(t.recommended_check) }}</p>
+    {% if t.observation_period_note %}
+      <p style="margin:4px 0 0;color:var(--warn);font-size:12px">
+        ⚠️ {{ t.observation_period_note }}</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+{% else %}
+  <p class="muted">无</p>
+{% endif %}
+
+{# ==================== 五、集中度 ==================== #}
+<h2>集中度</h2>
+<dl class="kv">
+  <div><dt>名义持仓数量</dt><dd>{{ c.concentration.nominal_position_count if c.concentration.nominal_position_count is not none else '无数据' }}</dd></div>
+  <div><dt>有效多头持仓</dt><dd>{{ c.concentration.eligible_long_position_count if c.concentration.eligible_long_position_count is not none else '无数据' }}</dd></div>
+  <div><dt>HHI</dt><dd>{{ num(c.concentration.hhi) if c.concentration.hhi is not none else '无数据' }}</dd></div>
+  <div><dt>等效持仓数量</dt><dd>{{ num(c.concentration.effective_position_count) if c.concentration.effective_position_count is not none else '无数据' }}</dd></div>
+  <div><dt>最大单仓权重</dt><dd>{{ pct(c.concentration.largest_position_weight) if c.concentration.largest_position_weight is not none else '无数据' }}</dd></div>
+  <div><dt>单仓主导</dt><dd>{{ '是' if c.concentration.single_position_dominance else '否' }}</dd></div>
+</dl>
+{% if c.concentration.not_applicable_rules %}
+<div style="border:1px solid var(--warn);border-radius:8px;padding:10px 14px;
+  margin-top:8px;font-size:12px;line-height:1.7">
+  <b style="color:var(--warn)">以下指标当前不适用 —— 不适用不等于规则通过</b>
+  <ul style="margin:6px 0 0;padding-left:20px">
+    {% for r in c.concentration.not_applicable_rules %}<li>{{ r }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% if c.concentration.narrative %}
+  <p style="margin-top:8px">{{ clean_decimals(c.concentration.narrative) }}</p>
+{% endif %}
+
+{# ==================== 六、收益归因 ==================== #}
+<h2>盈亏与收益归因</h2>
+<dl class="kv">
+  <div><dt>当期净值变化</dt><dd>{{ money(c.performance.raw_nav_change) if c.performance.raw_nav_change is not none else '无数据' }}</dd></div>
+  <div><dt>外部入金出金</dt><dd>{{ money(c.performance.external_cash_flow) if c.performance.external_cash_flow is not none else '无数据' }}</dd></div>
+  <div><dt>现金流调整后收益</dt><dd><b>{{ money(c.performance.cash_flow_adjusted_pnl) if c.performance.cash_flow_adjusted_pnl is not none else '无数据' }}</b></dd></div>
+  <div><dt>已实现盈亏</dt><dd>{{ money(c.performance.realized_pnl) if c.performance.realized_pnl is not none else '无数据' }}</dd></div>
+  <div><dt>未实现盈亏变化</dt><dd>{{ money(c.performance.unrealized_pnl_change) if c.performance.unrealized_pnl_change is not none else '无数据' }}</dd></div>
+  <div><dt>分红</dt><dd>{{ money(c.performance.dividends) if c.performance.dividends is not none else '无数据' }}</dd></div>
+  <div><dt>利息</dt><dd>{{ money(c.performance.interest) if c.performance.interest is not none else '无数据' }}</dd></div>
+  <div><dt>佣金与费用</dt><dd>{{ money(c.performance.commissions) if c.performance.commissions is not none else '无数据' }}</dd></div>
+  <div><dt>税费</dt><dd>{{ money(c.performance.taxes) if c.performance.taxes is not none else '无数据' }}</dd></div>
+  <div><dt>未解释差额</dt><dd>{{ money(c.performance.unexplained_difference) if c.performance.unexplained_difference is not none else '无数据' }}</dd></div>
+  <div><dt>Modified Dietz</dt><dd>{{ pct(c.performance.modified_dietz_return) if c.performance.modified_dietz_return is not none else '无数据' }}</dd></div>
+  <div><dt>TWR</dt><dd>{{ pct(c.performance.twr_return) if c.performance.twr_return is not none else '无数据' }}</dd></div>
+  <div><dt>数据质量</dt><dd>{{ c.performance.data_quality or '无数据' }}</dd></div>
+</dl>
+{% if c.performance.narrative %}<p style="margin-top:8px">{{ clean_decimals(c.performance.narrative) }}</p>{% endif %}
+{% if c.performance.limitations %}
+<ul style="font-size:12px;color:var(--muted);line-height:1.7">
+  {% for l in c.performance.limitations %}<li>{{ clean_decimals(l) }}</li>{% endfor %}
+</ul>
+{% endif %}
+
+{# ==================== 七、历史基线 ==================== #}
+<h2>历史基线对比</h2>
+<dl class="kv">
+  <div><dt>上一有效交易日</dt><dd>{{ c.historical_comparison.previous_day or '无数据' }}</dd></div>
+  <div><dt>近 7 个交易日</dt><dd>{{ c.historical_comparison.seven_day_baseline or '无数据' }}</dd></div>
+  <div><dt>近 30 个交易日</dt><dd>{{ c.historical_comparison.thirty_day_baseline or '无数据' }}</dd></div>
+  <div><dt>样本量</dt><dd>{{ c.historical_comparison.sample_size if c.historical_comparison.sample_size is not none else '无数据' }}</dd></div>
+</dl>
+
+{# ==================== 八、今日检查 ==================== #}
+<h2>今日需要检查</h2>
+<p class="muted" style="font-size:12px">
+  以下均为<b>检查事项</b>，不是交易指令。本系统不生成任何买卖建议。
+</p>
+<ul style="line-height:1.9">
+  {% for x in c.checks %}<li>{{ clean_decimals(x) }}</li>{% endfor %}
+</ul>
+
+{# ==================== 九、数据限制 ==================== #}
+<h2>数据限制</h2>
+<ul style="line-height:1.8;font-size:13px">
+  {% for l in c.data_limitations %}<li>{{ clean_decimals(l) }}</li>{% endfor %}
+</ul>
+
+{# ==================== 十、数据来源 ==================== #}
+<h2>数据来源<span class="h2sub">{{ d.source_count }} 条引用 · 关键数字均可追溯</span></h2>
+<table>
+  <thead><tr><th>指标</th><th>结构化取值</th><th>来源表</th><th>来源 ID</th>
+    <th>计算版本</th><th>数据时间</th><th>类型</th></tr></thead>
+  <tbody>
+    {% for f in d.facts %}
+    <tr>
+      <td>{{ f.label }}</td>
+      <td class="cellnum"><b>{{ f.value }}</b></td>
+      <td>{{ f.source_table or '—' }}</td>
+      <td><code style="font-size:11px">{{ f.source_id or '—' }}</code></td>
+      <td style="font-size:11px">{{ f.source_version or '—' }}</td>
+      <td style="font-size:11px">{{ f.data_as_of or '—' }}</td>
+      <td>{{ f.source_type or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{# ==================== 十一、版本与生成方式 ==================== #}
+<h2>简报版本与生成方式</h2>
+<dl class="kv">
+  <div><dt>生成方式</dt><dd>{{ d.status_label }}</dd></div>
+  <div><dt>门禁模式</dt><dd>{{ d.mode_label }}（{{ d.mode }}）</dd></div>
+  <div><dt>模型</dt><dd>{{ d.model }}</dd></div>
+  <div><dt>Prompt 版本</dt><dd>{{ d.prompt_version or '—' }}</dd></div>
+  <div><dt>上下文版本</dt><dd>{{ d.context_version or '—' }}</dd></div>
+  <div><dt>上下文指纹</dt><dd><code style="font-size:11px">{{ d.context_hash }}</code></dd></div>
+  <div><dt>AI 尝试次数</dt><dd>{{ d.ai_attempts }}</dd></div>
+  {% for k, v in d.calc_versions.items() %}
+  <div><dt>{{ k }} 计算版本</dt><dd style="font-size:11px">{{ v or '—' }}</dd></div>
+  {% endfor %}
+</dl>
+
+{% if d.deliveries %}
+<h3>推送记录</h3>
+<table>
+  <thead><tr><th>时间</th><th>渠道</th><th>状态</th><th>原因</th></tr></thead>
+  <tbody>
+    {% for x in d.deliveries %}
+    <tr><td>{{ x.created_at[:19] }}</td><td>{{ x.channel }}</td>
+      <td>{{ x.status }}</td><td class="muted">{{ x.reason or '—' }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% endif %}
+
+{# ==================== 历史简报 ==================== #}
+<h2>历史简报<span class="h2sub">共 {{ d.total }} 份</span></h2>
+{% if d.history %}
+<table>
+  <thead><tr><th>日期</th><th>版本</th><th>模式</th><th>生成方式</th>
+    <th>校验</th><th>已推送</th><th></th></tr></thead>
+  <tbody>
+    {% for b in d.history %}
+    <tr>
+      <td>{{ b.brief_date }}</td>
+      <td class="cellnum">v{{ b.revision }}</td>
+      <td>{{ b.generation_mode }}</td>
+      <td>{{ b.generation_status }}</td>
+      <td>{{ '✅' if b.validation_status=='passed' else '❌' }}</td>
+      <td>{{ '✅' if b.delivered_at else '—' }}</td>
+      <td><a href="/briefs?brief={{ b.brief_id }}">查看</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">暂无历史简报</p>
+{% endif %}
+
+{% if d.executions %}
+<h3>调度执行审计<span class="h2sub">一次计划触发的完整生命周期</span></h3>
+<table>
+  <thead><tr><th>计划时刻</th><th>实际开始</th><th>等待次数</th><th>依赖状态</th>
+    <th>模式</th><th>生成方式</th><th>校验</th><th>推送</th><th>完成</th></tr></thead>
+  <tbody>
+    {% for e in d.executions %}
+    <tr>
+      <td>{{ e.scheduled_for[:16] }}</td>
+      <td>{{ e.actual_started_at[:19] }}</td>
+      <td class="cellnum">{{ e.dependency_wait_count }}</td>
+      <td>{{ e.dependency_ready_status or '—' }}</td>
+      <td>{{ e.generation_mode or '—' }}</td>
+      <td>{{ e.generation_status or '—' }}</td>
+      <td>{{ e.validation_status or '—' }}</td>
+      <td>{{ e.delivery_status or '未推送' }}</td>
+      <td>{{ (e.completed_at or '进行中')[:19] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if d.runs %}
+<h3>最近生成任务</h3>
+<table>
+  <thead><tr><th>时间</th><th>触发</th><th>状态</th><th>模式</th>
+    <th>复用</th><th>耗时</th><th>错误</th></tr></thead>
+  <tbody>
+    {% for r in d.runs %}
+    <tr>
+      <td>{{ r.started_at[:19] }}</td><td>{{ r.trigger }}</td>
+      <td>{{ r.status }}</td><td>{{ r.generation_mode or '—' }}</td>
+      <td>{{ '是' if r.reused else '—' }}</td>
+      <td class="cellnum">{{ r.duration_ms or '—' }} ms</td>
+      <td class="muted" style="font-size:11px">{{ (r.error or '—')[:80] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<script>
+(function(){
+  if(!window.matchMedia('(max-width:768px)').matches)return;
+  var collapsed=['风险变化','集中度','盈亏与收益归因','历史基线对比','数据限制','数据来源','简报版本与生成方式','历史简报'];
+  Array.from(document.querySelectorAll('main>h2')).forEach(function(h){
+    var title=h.textContent.trim();
+    if(!collapsed.some(function(x){return title.indexOf(x)===0;}))return;
+    var box=document.createElement('details');box.className='brief-mobile-section';
+    var summary=document.createElement('summary');summary.textContent=title;
+    var body=document.createElement('div');body.className='brief-section-body';
+    h.parentNode.insertBefore(box,h);box.appendChild(summary);box.appendChild(body);
+    var node=h.nextSibling;h.remove();
+    while(node){var next=node.nextSibling;if(node.nodeType===1&&node.tagName==='H2')break;body.appendChild(node);node=next;}
+  });
+  Array.from(document.querySelectorAll('main table')).forEach(function(table){
+    var heads=Array.from(table.querySelectorAll('thead th')).map(function(x){return x.textContent.trim();});
+    if(!heads.length)return;
+    var list=document.createElement('div');list.className='mobile-card-list';
+    Array.from(table.querySelectorAll('tbody tr')).forEach(function(row){
+      var cells=Array.from(row.children);if(!cells.length)return;
+      var card=document.createElement('details');card.className='mobile-data-card';
+      var sum=document.createElement('summary');
+      var head=document.createElement('div');head.className='mobile-card-head';
+      var ttl=document.createElement('span');ttl.className='mobile-card-title';ttl.textContent=cells[0].textContent.trim()||'记录';
+      var val=document.createElement('span');val.className='mobile-card-value';val.textContent=cells[1]?cells[1].textContent.trim():'';
+      head.appendChild(ttl);head.appendChild(val);sum.appendChild(head);card.appendChild(sum);
+      var body=document.createElement('div');body.className='mobile-card-body';var dl=document.createElement('dl');dl.className='mobile-kv';
+      cells.forEach(function(cell,i){var dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=heads[i]||('字段'+(i+1));dd.innerHTML=cell.innerHTML;dl.appendChild(dt);dl.appendChild(dd);});
+      body.appendChild(dl);card.appendChild(body);list.appendChild(card);
+    });
+    table.classList.add('desktop-only');table.parentNode.insertBefore(list,table.nextSibling);
+  });
+})();
+</script>
+
+{% endblock %}

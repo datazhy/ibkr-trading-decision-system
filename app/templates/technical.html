@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}技术面 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set d = data %}
+
+{% macro trend_css(s) -%}
+{{ 'good' if s in ('强多头','多头趋势','周线多头') else ('warn' if s in ('回踩趋势','均线纠缠','过度延伸','明显偏高','短线转弱','周线上升但回调','周线震荡') else ('crit' if s in ('中期趋势破坏','长期弱势','周线弱势','明显转弱') else '')) }}
+{%- endmacro %}
+
+{% macro atr_dist(v) -%}
+{%- if v is none -%}—{%- else -%}{{ '+' if v >= 0 else '' }}{{ num(v) }} ATR{%- endif -%}
+{%- endmacro %}
+
+<style>
+  .tech-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0 4px}
+  .tech-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .tech-card .n{font-size:24px;font-weight:600;line-height:1.1}
+  .tech-card .k{font-size:12px;color:var(--muted);margin-top:2px}
+  .tech-note{font-size:12px;color:var(--muted);margin:2px 0 14px}
+  .tech-note b{color:var(--warn)}
+  .tcols{--grid:76px 68px 92px minmax(210px,1.7fr) 88px 78px 74px minmax(96px,1fr) 74px}
+  .trow{border-top:1px solid var(--line)}
+  .trow>summary{list-style:none;cursor:pointer;padding:10px 12px;display:grid;
+    grid-template-columns:var(--grid);gap:10px;align-items:center}
+  .trow>summary::-webkit-details-marker{display:none}
+  .trow>summary:hover{background:var(--panel2)}
+  .trow .sym{font-weight:600}
+  .trow .px{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+  .trow .sub{font-size:11px;color:var(--muted)}
+  .emacell{display:flex;flex-wrap:wrap;gap:1px 8px;font-size:11px;color:var(--muted);line-height:1.5}
+  .emacell b{color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
+  .tstate{font-weight:600}
+  .tstate.good{color:var(--good)} .tstate.warn{color:var(--warn)} .tstate.crit{color:var(--crit)}
+  .tnum{text-align:right;font-variant-numeric:tabular-nums}
+  .tbody{padding:4px 14px 16px;background:var(--panel2)}
+  .tech-rec{border-left:3px solid var(--line);border-radius:0 8px 8px 0;padding:8px 12px;margin:4px 0 8px;font-size:13px;background:var(--panel)}
+  .tech-rec.good{border-left-color:var(--good)} .tech-rec.warn{border-left-color:var(--warn)} .tech-rec.crit{border-left-color:var(--crit)}
+  .tech-rec .lbl{color:var(--muted);font-size:12px} .tech-rec b{margin:0 6px}
+  .tech-rec .rsn{color:var(--fg)} .tech-rec .by{color:var(--muted);font-size:11px;margin-left:6px}
+  .tech-rules{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 8px}
+  .rchip{font-size:12px;padding:3px 9px;border-radius:12px;border:1px solid var(--line);color:var(--muted)}
+  .rchip.sev-warn{border-color:var(--warn);color:var(--warn)} .rchip.sev-crit{border-color:var(--crit);color:var(--crit)}
+  .stdout{font:13px/1.9 var(--font-mono,monospace);white-space:pre-wrap;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:8px 0}
+  .emagrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px 18px;font-size:13px;margin:6px 0}
+  .emagrid .r{display:flex;justify-content:space-between;border-bottom:1px dotted var(--line);padding:2px 0}
+  .thead{display:grid;grid-template-columns:var(--grid);gap:10px;
+    padding:6px 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--line)}
+  .tl-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid var(--line);font-size:13px}
+  .tl-row:first-child{border-top:none}
+  .tl-sym{font-weight:600;min-width:64px} .tl-sum{flex:1;color:var(--fg)}
+  .tl-when{white-space:nowrap}
+  .ref h4{margin:14px 0 4px;font-size:13px} .ref{font-size:12px;color:var(--text)}
+  .ref table{border-collapse:collapse;width:100%;margin:4px 0 8px}
+  .ref td,.ref th{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
+  .ref th{color:var(--muted);font-weight:500}
+  @media(max-width:820px){.trow>summary,.thead{grid-template-columns:1fr 1fr;}.thead{display:none}}
+</style>
+
+<h2 id="technical">📈 技术面
+  <span class="h2sub">按需现算 · {{ d.session_label }} · {{ d.calc_version }}</span></h2>
+
+{# ---------- 摘要卡片 ---------- #}
+<div class="tech-cards">
+  <div class="tech-card"><div class="n">{{ d.summary.strong }}</div><div class="k">强趋势（日周同多）</div></div>
+  <div class="tech-card"><div class="n">{{ d.summary.pullback }}</div><div class="k">回踩观察</div></div>
+  <div class="tech-card"><div class="n">{{ d.summary.breakout }}</div><div class="k">突破观察</div></div>
+  <div class="tech-card"><div class="n">{{ d.summary.extended }}</div><div class="k">过度延伸</div></div>
+  <div class="tech-card"><div class="n">{{ d.summary.broken }}</div><div class="k">趋势破坏</div></div>
+</div>
+<div class="tech-note">
+  数据截至 {{ d.as_of_rel }} ·
+  {% if d.intraday %}<b>盘中状态，尚未收盘确认</b>{% else %}最近正式确认 · 收盘{% endif %}
+  {% if d.insufficient_count %} · {{ d.insufficient_count }} 个标的历史不足 52 周{% endif %}
+  {% if d.stale_count %} · <b>{{ d.stale_count }} 个报价过期</b>{% endif %}
+  · 技术面仅辅助执行，不覆盖仓位上限与止损
+</div>
+
+{% if d.cards %}
+<div class="panel tcols" style="padding:0">
+  <div class="thead">
+    <span>标的</span><span class="tnum">最新价</span><span>日线排列</span>
+    <span>均线 EMA5–250（↑升 →平 ↓降）</span><span>周线</span>
+    <span class="tnum">距EMA20</span><span class="tnum">距52周</span><span>技术信号</span><span>确认</span>
+  </div>
+  {% for c in d.cards %}
+  <details class="trow tcols">
+    <summary>
+      <span class="sym">{{ c.symbol }}</span>
+      <span class="px">{{ num(c.price) }}</span>
+      <span class="tstate {{ trend_css(c.daily_trend_state)|trim }}">{{ c.daily_trend_state or '—' }}</span>
+      <span class="emacell">
+        {% for p in d.ema_periods %}<span>E{{ p }}{{ {'up':'↑','flat':'→','down':'↓'}.get(c.ema_slope.get(p),'') }} <b>{{ num(c.ema.get(p)) if c.ema.get(p) is not none else '—' }}</b></span>{% endfor %}
+      </span>
+      <span class="tstate {{ trend_css(c.weekly_trend_state)|trim }}" style="font-size:12px">{{ c.weekly_trend_state or '历史不足' }}</span>
+      <span class="tnum {{ 'tstate '+trend_css(c.position_state)|trim if c.position_state }}">{{ atr_dist(c.dist_ema20_atr) }}</span>
+      <span class="tnum sub">{{ pct(c.dist_high_52w_pct) if c.dist_high_52w_pct is not none else '—' }}</span>
+      <span class="sub" style="font-size:12px;color:var(--fg)">{{ c.technical_summary }}</span>
+      <span class="sevtag {{ 'ok' if c.confirmation=='CLOSE_CONFIRMED' else 'warn' }}">{{ '收盘确认' if c.confirmation=='CLOSE_CONFIRMED' else ('盘后待确认' if c.confirmation=='EXTENDED_HOURS_PENDING' else '盘中待确认') }}</span>
+    </summary>
+    <div class="tbody">
+      {# ---- 综合建议（技术面服从仓位上限与止损）---- #}
+      {% set rec = c.recommendation %}
+      {% if rec %}
+      {% set rc = 'crit' if rec.final_action=='EXECUTE_STOP' else ('warn' if rec.final_action in ('CHECK_REDUCE','DO_NOT_ADD','HOLD_NO_ADVICE') else 'good') %}
+      <div class="tech-rec {{ rc }}">
+        <span class="lbl">综合建议</span> <b>{{ rec.final_label }}</b>
+        <span class="rsn">{{ rec.reason }}</span>
+        <span class="by">依据：{{ {'hard_stop':'账户止损','position_limit':'仓位上限','data_quality':'数据质量','technical':'技术面'}.get(rec.decided_by, rec.decided_by) }}{% if rec.confirmation=='EXTENDED_HOURS_PENDING' %} · 盘后待确认{% elif rec.confirmation=='INTRADAY_PENDING' %} · 盘中待确认{% endif %}</span>
+      </div>
+      {% endif %}
+      {% if c.rules %}
+      <div class="tech-rules">
+        {% for r in c.rules %}<span class="rchip sev-{{ r.severity }}">{{ r.code }} · {{ r.summary }}{% if r.confirmation in ('INTRADAY_PENDING','EXTENDED_HOURS_PENDING') %} · 待确认{% endif %}</span>{% endfor %}
+      </div>
+      {% endif %}
+      {# ---- 标准 8 行输出 ---- #}
+      <div class="stdout">趋势：{{ c.daily_trend_state or '历史不足' }}
+周线：{{ c.weekly_trend_state or '历史不足' }}
+位置：{{ c.position_state or '—' }}{% if c.high_20d_state %} · {{ c.high_20d_state }}{% endif %}{% if c.high_52w_state %} · {{ c.high_52w_state }}{% endif %}
+偏离：距EMA20 {{ atr_dist(c.dist_ema20_atr) }}{% if c.dist_ema20_pct is not none %}（{{ pct(c.dist_ema20_pct) }}）{% endif %}{% if c.dist_stop_atr is not none %} · 距止损 {{ num(c.dist_stop_atr) }} ATR{% endif %}
+量能：{{ c.volume_state or '待确认' }}{% if c.rvol20 is not none %} · RVOL {{ num(c.rvol20) }}×{% endif %}
+信号：{{ c.technical_summary }}
+确认：{% if c.confirmation=='EXTENDED_HOURS_PENDING' %}盘后/盘前扩展时段，等待RTH收盘确认{% elif c.confirmation=='INTRADAY_PENDING' %}盘中状态，等待收盘确认{% else %}收盘确认{% endif %}</div>
+
+      {# ---- EMA 明细（含斜率与偏离）---- #}
+      <div class="emagrid">
+        {% for p in d.ema_periods %}
+        <div class="r"><span>EMA{{ p }}{% if c.ema_slope.get(p) %} {{ {'up':'↑','flat':'→','down':'↓'}[c.ema_slope.get(p)] }}{% endif %}</span>
+          <span>{% if c.ema.get(p) is not none %}{{ num(c.ema.get(p)) }}{% if c.price and c.ema.get(p) %} · {{ pct((c.price-c.ema.get(p))/c.ema.get(p)) }}{% endif %}{% else %}历史不足{% endif %}</span></div>
+        {% endfor %}
+      </div>
+      <div class="emagrid">
+        <div class="r"><span>周线 EMA10/20/40</span><span>{{ num(c.weekly_ema.get(10)) if c.weekly_ema.get(10) is not none else '—' }} / {{ num(c.weekly_ema.get(20)) if c.weekly_ema.get(20) is not none else '—' }} / {{ num(c.weekly_ema.get(40)) if c.weekly_ema.get(40) is not none else '—' }}</span></div>
+        <div class="r"><span>ATR14{% if c.atr_period_used and c.atr_period_used != 14 %}（降级 ATR{{ c.atr_period_used }}）{% endif %}</span><span>{{ num(c.atr14) if c.atr14 is not none else '—' }}{% if c.atr14_pct is not none %} · {{ pct(c.atr14_pct) }}{% endif %}</span></div>
+        <div class="r"><span>20日高点</span><span>{{ num(c.high_20d) if c.high_20d is not none else '历史不足' }}{% if c.dist_high_20d_pct is not none %} · {{ pct(c.dist_high_20d_pct) }}{% endif %}</span></div>
+        <div class="r"><span>52周高点</span><span>{{ num(c.high_52w) if c.high_52w is not none else '历史不足' }}{% if c.dist_high_52w_pct is not none %} · {{ pct(c.dist_high_52w_pct) }}{% endif %}</span></div>
+        <div class="r"><span>RVOL20</span><span>{{ num(c.rvol20) ~ '×' if c.rvol20 is not none else '待确认' }}</span></div>
+        <div class="r"><span>参与计算日线</span><span>{{ c.bars_available }} 根</span></div>
+      </div>
+      <div class="sub" style="margin-top:6px">报价 {{ c.quote_source }} · {{ c.quote_rel }}
+        {% if c.stale_css=='warn' %}<span class="sevtag warn">报价延迟</span>{% elif c.stale_css=='crit' %}<span class="sevtag crit">报价过期</span>{% endif %}</div>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% else %}
+<div class="panel"><p class="muted" style="margin:0">当前无持仓，或日线数据尚未就绪。</p></div>
+{% endif %}
+
+{# ==================== 技术触发时间线 ==================== #}
+{% if d.timeline %}
+<h2 id="tech-timeline" style="margin-top:22px">🕒 技术触发时间线
+  <span class="h2sub">只记状态变化 · 同规则同周期只留一条 · 不推送</span></h2>
+<div class="panel" style="padding:2px 0">
+  {% for e in d.timeline %}
+  <div class="tl-row">
+    <span class="tl-sym">{{ e.symbol }}</span>
+    <span class="rchip">{{ e.rule_code }}</span>
+    <span class="tl-sum">{{ e.summary or e.title }}</span>
+    <span class="sevtag {{ 'crit' if e.status=='resolved' else ('warn' if e.severity in ('high','critical') else 'ok') }}">{{ e.status_label }}</span>
+    <span class="sub tl-when">{{ e.when }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ==================== 判定规则说明（备查）==================== #}
+<h2 id="tech-rules" style="margin-top:22px">📖 判定规则说明<span class="h2sub">口径固定 · 便于日后查看 · {{ d.calc_version }}</span></h2>
+<div class="panel ref">
+  <p style="margin:0 0 6px;color:var(--muted)">
+    综合裁决优先级（固定，不可配置）：<b>账户安全与硬止损 &gt; 仓位上限与风险预算 &gt; 持仓决策与操作计划 &gt; 技术面规则 &gt; 单一技术指标</b>。
+    即：技术面再强，只要仓位超限或已破止损，都不会输出「加仓」。
+  </p>
+
+  <h4>一、日线排列（七态）</h4>
+  <table>
+    <tr><th>状态</th><th>判定逻辑</th></tr>
+    <tr><td>强多头</td><td>价 &gt; EMA5 &gt; EMA10 &gt; EMA20 &gt; EMA60 &gt; EMA120 &gt; EMA250，且 EMA20、EMA60 向上</td></tr>
+    <tr><td>多头趋势</td><td>价 &gt; EMA20 &gt; EMA60 &gt; EMA120 &gt; EMA250</td></tr>
+    <tr><td>回踩趋势</td><td>EMA20、EMA60 向上，价格回落到 EMA20~EMA10 之间</td></tr>
+    <tr><td>均线纠缠</td><td>EMA5 / EMA10 / EMA20 三者极差 &lt; 0.5 × ATR14</td></tr>
+    <tr><td>短线转弱</td><td>收盘跌破 EMA20</td></tr>
+    <tr><td>中期趋势破坏</td><td>收盘跌破 EMA60，且 EMA60 走平或下降</td></tr>
+    <tr><td>长期弱势</td><td>价格低于 EMA120</td></tr>
+  </table>
+
+  <h4>二、位置（距 EMA20 的 ATR 倍数）与均线方向</h4>
+  <table>
+    <tr><th>距 EMA20</th><th>状态</th><th>均线方向</th><th>判定</th></tr>
+    <tr><td>0 ~ 0.5 ATR</td><td>贴近趋势线</td><td rowspan="5" style="vertical-align:middle">按 EMA 相对 N 根前的变化：<br>|Δ| &lt; 0.15 × ATR 记「走平 →」，<br>否则按符号记「上升 ↑ / 下降 ↓」。<br>回看：EMA20=5 根 / EMA60=10 根 / EMA120=20 根 / EMA250=40 根。</td></tr>
+    <tr><td>0.5 ~ 1.5 ATR</td><td>健康趋势</td></tr>
+    <tr><td>1.5 ~ 2 ATR</td><td>明显偏高</td></tr>
+    <tr><td>&gt; 2 ATR</td><td>过度延伸</td></tr>
+    <tr><td>&lt; -1 ATR</td><td>明显转弱</td></tr>
+  </table>
+
+  <h4>三、周线趋势 / 高点 / 量能</h4>
+  <table>
+    <tr><th>维度</th><th>状态与阈值</th></tr>
+    <tr><td>周线趋势</td><td>周线多头（周价&gt;WEMA10&gt;WEMA20&gt;WEMA40 且 WEMA10↑）/ 周线上升但回调 / 周线震荡 / 周线弱势（周价&lt;WEMA40）。周线由日线本地按 ISO 周聚合。</td></tr>
+    <tr><td>20 日高点</td><td>远离 / 接近（距高点 ≤3%）/ 盘中突破 / 收盘突破。用前 20 个完整交易日最高价，排除当前未完成日。</td></tr>
+    <tr><td>52 周高点</td><td>接近新高（≤2%）/ 强势区（≤10%）/ 正常回撤（≤25%）/ 深度回撤（&gt;25%）。仅判断位置，不单独作为买卖信号。</td></tr>
+    <tr><td>量能 RVOL20</td><td>放量 ≥1.5 / 正常 0.8~1.5 / 缩量 &lt;0.8。盘中为最近收盘口径，真盘中量能待收盘确认。</td></tr>
+  </table>
+
+  <h4>四、技术规则 T1–T8</h4>
+  <table>
+    <tr><th>规则</th><th>触发条件</th><th>输出</th></tr>
+    <tr><td>T1 强多头排列</td><td>价&gt;EMA5&gt;EMA10&gt;EMA20&gt;EMA60&gt;EMA120&gt;EMA250，EMA20、EMA60 向上</td><td>强多头趋势（不独立生成加仓，仍需查仓位与偏离）</td></tr>
+    <tr><td>T2 健康回踩 EMA20</td><td>周线非弱势，EMA20/60 向上，距 EMA20 在 ±0.5 ATR，量能正常或缩量</td><td>多头趋势中的健康回踩</td></tr>
+    <tr><td>T3 过度延伸</td><td>价高于 EMA20 超过 2 ATR</td><td>短线过度延伸，不宜追涨（优先于强多头加仓提示）</td></tr>
+    <tr><td>T4 突破 20 日高点</td><td>收盘 &gt; 前 20 日高，RVOL20 ≥1.5，周线非弱势</td><td>20 日突破已确认（量能不足→等待确认；盘中→尚未收盘确认）</td></tr>
+    <tr><td>T5 突破 52 周高点</td><td>收盘突破 52 周高，日线多头，周线多头，量能放大</td><td>52 周新高趋势确认（若距 EMA20&gt;2 ATR 则不追涨）</td></tr>
+    <tr><td>T6 短线转弱</td><td>收盘跌破 EMA20</td><td>短线转弱，中期趋势尚未破坏（单次跌破不直接清仓）</td></tr>
+    <tr><td>T7 中期趋势破坏</td><td>收盘跌破 EMA60，EMA60 走平/下降，RVOL20 ≥1.5</td><td>中期趋势破坏，检查减仓计划（若已触发止损则按止损优先）</td></tr>
+    <tr><td>T8 日周线冲突</td><td>日线多头但周线弱势 / 日线跌破 EMA20 但周线仍多头</td><td>日线反弹周线尚未反转 / 短线回调长期结构未破</td></tr>
+  </table>
+
+  <h4>五、综合建议动作</h4>
+  <table>
+    <tr><th>动作</th><th>含义 / 触发</th></tr>
+    <tr><td>优先执行止损/减仓</td><td>已跌破止损（账户止损优先级最高）</td></tr>
+    <tr><td>检查减仓计划</td><td>中期趋势破坏</td></tr>
+    <tr><td>不加仓</td><td>仓位已超计划上限，或短线过度延伸（不追涨）</td></tr>
+    <tr><td>可按计划分档观察 / 观察等待收盘确认</td><td>结构健康且仍有加仓空间；盘中只观察，收盘才可分档</td></tr>
+    <tr><td>持有</td><td>结构中性或短线转弱但中期未破</td></tr>
+    <tr><td>暂不建议</td><td>数据过期或历史不足</td></tr>
+  </table>
+
+  <p style="margin:8px 0 0;color:var(--muted)">
+    指标口径：日线 IBKR TRADES（拆股调整 · RTH）本地算 EMA/ATR/高点；周线由日线本地聚合。不设百分制评分，避免虚假精确。
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}事件复盘 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set d = data %}
+<style>
+  .datanote{border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12px;line-height:1.7;
+    background:var(--panel)}
+  .stchips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0;font-size:12px}
+  .stchips span{border:1px solid var(--line);border-radius:7px;padding:3px 10px;
+    color:var(--muted)}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .filters select{font-size:12px;padding:4px 8px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+  .rev{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    margin-bottom:12px;background:var(--panel)}
+  .rev h4{margin:0 0 4px;font-size:13px;display:flex;gap:8px;align-items:center;
+    flex-wrap:wrap}
+  .tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:7px;
+    border:1px solid var(--line);color:var(--muted)}
+  .tag.done{color:var(--good);border-color:var(--good)}
+  .tag.pend{color:var(--warn);border-color:var(--warn)}
+  .tag.na{color:var(--muted)}
+  /* 三类信息分开呈现：事实 / 系统计算 / 数据限制 / 复盘评价 */
+  .sect{margin-top:8px;font-size:12px;line-height:1.7}
+  .sect .lbl{color:var(--muted);font-size:11px;text-transform:none;
+    letter-spacing:.3px;font-weight:600}
+  .wtbl{width:100%;border-collapse:collapse;font-size:12px;margin-top:5px;
+    font-variant-numeric:tabular-nums}
+  .wtbl th{text-align:left;font-size:11px;color:var(--muted);font-weight:500;
+    padding:4px 6px;border-bottom:1px solid var(--line)}
+  .wtbl td{padding:4px 6px;border-bottom:1px solid var(--line)}
+  .wtbl .pending{color:var(--muted);font-style:italic}
+  .limit{color:var(--warn);font-size:11px;margin-top:4px}
+  .excl{color:var(--muted);font-size:12px;font-style:italic}
+  .pager{display:flex;gap:6px;align-items:center;margin-top:12px;font-size:12px}
+  .pager a{padding:3px 10px;border:1px solid var(--line);border-radius:7px;
+    color:var(--muted);text-decoration:none}
+</style>
+
+<h2>事件复盘<span class="h2sub">共 {{ d.total }} 条 · 每个 episode 的事后结果</span></h2>
+
+<div class="datanote">
+  <b>数据基础：</b>{{ d.data_note.note }}<br>
+  <b>怎么读：</b>观察窗口按<b>交易日</b>计算，不是自然日。窗口没走完的事件标为
+  「窗口未走完」且<b>不参与</b>规则效果统计 —— 用半截数据下结论会让 precision 系统性偏高。
+  窗口内若存在成交，须区分「风险没发生」与「用户看到告警后已采取行动」。
+</div>
+
+<div class="stchips">
+  {% for k, v in d.status_counts.items() %}<span>{{ k }}: {{ v }}</span>{% endfor %}
+</div>
+
+<form class="filters" method="get">
+  <select name="status" onchange="this.form.submit()">
+    {% for v, label in d.status_options %}
+    <option value="{{ v }}" {{ 'selected' if d.filters.status == v or (not d.filters.status and not v) }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+{% if not d.reviews %}
+<p style="color:var(--muted);font-size:13px">
+  尚无复盘记录。事件产生后系统会自动生成，观察窗口走完才会给出结论。
+</p>
+{% else %}
+{% for r in d.reviews %}
+<div class="rev">
+  <h4>{{ r.rule_code }}
+    <span class="tag {{ 'done' if r.review_status == 'completed' else ('pend' if r.review_status in ('pending','eligible') else 'na') }}">{{ r.status_label }}</span>
+    {% if r.affected_symbol %}<span class="tag">{{ r.affected_symbol }}</span>{% endif %}
+    <span class="tag">{{ r.source_type }}</span>
+    <span style="font-weight:400;color:var(--muted);font-size:11px">
+      首次 {{ r.first_abs }} · 持续 {{ r.duration_display }}</span>
+  </h4>
+
+  {% if r.review_status == 'excluded' %}
+  <div class="excl">不适用原因：{{ r.exclusion_reason }}</div>
+  {% else %}
+
+  <div class="sect">
+    <span class="lbl">事件发生时（事实）</span><br>
+    峰值严重度 {{ r.peak_severity or '—' }} ·
+    实际值 {{ pct(r.peak_actual_value) if r.peak_actual_value is not none else '—' }} ·
+    账户净值 {{ money(r.account_value_at_open) if r.account_value_at_open is not none else '—' }} ·
+    市场状态 {{ r.market_state_at_open or '—' }} ·
+    账户风险分 {{ num(r.account_risk_at_open) if r.account_risk_at_open is not none else '—' }} ·
+    市场风险分 {{ num(r.market_risk_at_open) if r.market_risk_at_open is not none else '—' }}
+  </div>
+
+  <div class="sect">
+    <span class="lbl">事件之后（系统计算）</span>
+    <table class="wtbl">
+      <thead><tr>
+        <th>窗口</th><th>账户变化</th><th>账户最大不利</th><th>账户最大回撤</th>
+        <th>QQQ 收益</th><th>QQQ 回撤</th><th>持仓最大不利</th><th>命中标签</th>
+      </tr></thead>
+      <tbody>
+      {% for w in r.windows %}
+      <tr>
+        <td>{{ w.n }} 日</td>
+        {% if w.status != 'ok' %}
+        <td colspan="7" class="pending">{{ w.note or '窗口尚未走完' }}</td>
+        {% else %}
+        <td>{{ pct(w.account_change) if w.account_change is not none else '—' }}</td>
+        <td>{{ pct(w.account_mae) if w.account_mae is not none else '—' }}</td>
+        <td>{{ pct(w.account_dd) if w.account_dd is not none else '—' }}</td>
+        <td>{{ pct(w.qqq_return) if w.qqq_return is not none else '—' }}</td>
+        <td>{{ pct(w.qqq_dd) if w.qqq_dd is not none else '—' }}</td>
+        <td>{{ pct(w.position_mae) if w.position_mae is not none else '—' }}</td>
+        <td>{{ w.hit_count }} 项{% if w.undetermined %}
+          <span class="pending">（{{ w.undetermined }} 项无法判定）</span>{% endif %}</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sect">
+    <span class="lbl">复盘评价</span><br>
+    提前量：{{ r.lead_label }}{% if r.lead_time_minutes %}（{{ r.lead_days }}）{% endif %} ·
+    恢复时间：{{ r.resolved_abs or '尚未恢复' }}
+  </div>
+
+  {% if r.cash_flow_status and r.cash_flow_status != 'clean' %}
+  <div class="limit">⚠ 数据限制：账户结果{{ r.cash_flow_label }}。{{ r.cash_flow_note }}</div>
+  {% endif %}
+  {% if r.trading_activity and r.trading_activity.count %}
+  <div class="limit">⚠ 数据限制：窗口内有 {{ r.trading_activity.count }} 笔成交
+    {%- if r.trading_activity.has_sells %}（含卖出）{% endif %}。{{ r.trading_activity.note }}</div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
+<div class="pager">
+  {% if d.page > 1 %}<a href="?page={{ d.page - 1 }}">上一页</a>{% endif %}
+  <span>第 {{ d.page }} / {{ d.pages }} 页</span>
+  {% if d.page < d.pages %}<a href="?page={{ d.page + 1 }}">下一页</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

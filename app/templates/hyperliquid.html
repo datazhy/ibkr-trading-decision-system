@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Hyperliquid XYZ 情报{% endblock %}
+{% block content %}
+<main class="page-content">
+  <div class="page-heading">
+    <div><h1>Hyperliquid XYZ 链上情报</h1><p class="muted">只读证据层 · 不下单 · 影子模型</p></div>
+    <span class="status-pill {{ 'good' if data.health.available else 'warn' }}">
+      {{ data.health.status }}
+    </span>
+  </div>
+  {% if not data.enabled %}
+  <div class="notice warning">Hyperliquid 主开关未开启；页面只展示已落库数据，不影响现有风控链路。</div>
+  {% endif %}
+  {% if not data.health.available %}
+  <div class="empty-state">链上库尚未启动或当前不可读：{{ data.health.status }}。</div>
+  {% else %}
+  <section class="card-grid">
+    <article class="card"><div class="muted">资产</div><strong>{{ data.assets|length }}</strong></article>
+    <article class="card"><div class="muted">最新信号</div><strong>{{ data.signals|length }}</strong></article>
+    <article class="card"><div class="muted">钱包候选</div><strong>{{ data.wallets|length }}</strong></article>
+    <article class="card"><div class="muted">最新采集</div><strong>{{ data.health.latest_run.finished_at if data.health.latest_run else '—' }}</strong></article>
+  </section>
+  <section class="panel">
+    <h2>信号</h2>
+    <div class="table-wrap"><table><thead><tr><th>标的</th><th>模型</th><th>状态</th><th>分数</th><th>置信度</th><th>质量</th><th>时点</th></tr></thead>
+    <tbody>{% for row in data.signals %}<tr><td>{{ row.canonical_symbol or row.coin }}</td><td>{{ row.model }}/{{ row.regime }}</td><td>{{ row.state }}</td><td>{{ row.score or '—' }}</td><td>{{ row.confidence }}</td><td>{{ row.quality_status }}</td><td>{{ row.signal_at }}</td></tr>{% else %}<tr><td colspan="7">尚无影子信号</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+  <section class="panel">
+    <h2>钱包候选</h2>
+    <div class="table-wrap"><table><thead><tr><th>地址</th><th>状态</th><th>90日名义额</th><th>活跃日</th><th>最后观察</th></tr></thead>
+    <tbody>{% for row in data.wallets %}<tr><td class="mono">{{ row.address }}</td><td>{{ row.status }}</td><td>{{ row.xyz_notional_90d or '—' }}</td><td>{{ row.active_days }}</td><td>{{ row.last_seen_at }}</td></tr>{% else %}<tr><td colspan="5">尚无候选钱包</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}

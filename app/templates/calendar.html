@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}收益日历 · 小鱼交易台{% endblock %}
+{% block content %}
+<h2>收益日历<span class="h2sub">
+  {% if view == 'year' %}整年各月收益一览{% else %}每格为 IBKR 账户当日总收益与收益率{% endif %}</span></h2>
+
+<div class="panel">
+  {# ---- 按月 / 按年 切换 ---- #}
+  <div style="display:flex;gap:6px;margin-bottom:12px">
+    <a class="btn {{ 'sec' if view == 'year' else '' }}"
+       href="/calendar?year={{ (cal.year if view != 'year' else cal_year.year) }}&month={{ cal.month if view != 'year' else 1 }}&view=month">按月</a>
+    <a class="btn {{ '' if view == 'year' else 'sec' }}"
+       href="/calendar?year={{ (cal.year if view != 'year' else cal_year.year) }}&view=year">按年</a>
+  </div>
+
+  {% if view == 'year' %}
+  {# ============ 年视图：12 个月各自收益 ============ #}
+  <div class="calnav">
+    <a class="btn sec" href="/calendar?year={{ cal_year.prev_year }}&view=year">← 上一年</a>
+    <span class="m">{{ cal_year.year }} 年</span>
+    <a class="btn sec" href="/calendar?year={{ cal_year.next_year }}&view=year">下一年 →</a>
+    {% if cal_year.year_amount is not none %}
+    <span class="muted" style="margin-left:auto">全年合计
+      <span class="{{ 'up' if cal_year.year_amount >= 0 else 'down' }}"
+            style="font-weight:600">{{ signed(cal_year.year_amount) }}</span></span>
+    {% endif %}
+  </div>
+
+  <div class="ymonths">
+    {% for mo in cal_year.months %}
+    <a class="ymon {{ 'future' if mo.is_future }}
+              {{ ('up' if mo.amount and mo.amount > 0 else ('down' if mo.amount and mo.amount < 0)) }}"
+       href="/calendar?year={{ cal_year.year }}&month={{ mo.month }}&view=month">
+      <div class="ym-k">{{ mo.label }}</div>
+      {% if mo.amount is not none %}
+        <div class="ym-amt {{ 'up' if mo.amount >= 0 else 'down' }}">{{ signed(mo.amount) }}</div>
+        {% if mo.pct is not none %}
+          <div class="ym-pc {{ 'up' if mo.pct >= 0 else 'down' }}">{{ pct(mo.pct) }}</div>
+        {% endif %}
+      {% elif not mo.is_future %}
+        <div class="ym-amt muted" style="font-weight:400">—</div>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  <p class="muted" style="margin-top:10px">
+    点击任意月份查看当月每日明细。月收益额累加 IBKR 官方每日总收益；
+    月收益率链接官方每日 TWR，已排除入出金和资产转移的影响。
+  </p>
+
+  {% else %}
+  {# ============ 月视图：每日收益 ============ #}
+  <div class="calnav">
+    <a class="btn sec" href="/calendar?year={{ cal.prev.year }}&month={{ cal.prev.month }}">← 上月</a>
+    <span class="m">{{ cal.year }} 年 {{ cal.month }} 月</span>
+    <a class="btn sec" href="/calendar?year={{ cal.next.year }}&month={{ cal.next.month }}">下月 →</a>
+    {% if cal.month_amount is not none %}
+    <span class="muted" style="margin-left:auto">本月合计
+      <span class="{{ 'up' if cal.month_amount >= 0 else 'down' }}"
+            style="font-weight:600">{{ signed(cal.month_amount) }}</span></span>
+    {% endif %}
+  </div>
+
+  {% if cal.has_data %}
+  <div class="scroll">
+  <table class="cal">
+    <thead><tr>{% for w in cal.weekday_labels %}<th class="{{ 'weekend' if loop.index0 >= 5 }}">{{ w }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for week in cal.weeks %}
+      <tr>
+      {% for cell in week %}
+        {% set is_weekend = loop.index0 >= 5 %}
+        {% if cell is none %}
+          <td class="empty {{ 'weekend' if is_weekend }}"></td>
+        {% else %}
+          <td class="{{ 'future' if cell.is_future }} {{ 'weekend' if is_weekend }}
+                     {{ '' if cell.has_jump else ('up' if cell.amount and cell.amount > 0 else ('down' if cell.amount and cell.amount < 0)) }}">
+            <div class="d">{{ cell.day }}</div>
+            {% if is_weekend %}
+              {# 周末休市：只留灰底，不显示结转出来的 0.00 噪音 #}
+            {% elif cell.has_jump %}
+              <div class="amt muted" style="font-weight:600;font-size:12px;color:var(--warn)">资金流</div>
+              <div class="flow">入金/出金当日，不计收益</div>
+            {% elif cell.amount is not none %}
+              <div class="amt {{ 'up' if cell.amount >= 0 else 'down' }}">{{ signed(cell.amount) }}</div>
+              {% if cell.pct is not none %}
+                <div class="pc {{ 'up' if cell.pct >= 0 else 'down' }}">{{ pct(cell.pct) }}</div>
+              {% endif %}
+              {% if cell.has_flow %}<div class="flow">含{{ cell.flow_label or '官方资本变动' }}</div>{% endif %}
+            {% elif not cell.is_future %}
+              <div class="amt muted" style="font-weight:400;font-size:12px">—</div>
+            {% endif %}
+          </td>
+        {% endif %}
+      {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted" style="margin-top:8px">
+    历史日优先使用 IBKR Flex 官方 Change in NAV（已含 MTM、佣金、利息等）；
+    尚未出报表的当日才以 IBKR 净资产差额减官方资金流兜底。成交 realizedPNL 仅代表已平仓部分。
+  </p>
+  {% else %}
+  <p class="muted">本月暂无收益数据。</p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

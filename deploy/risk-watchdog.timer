@@ -1,0 +1,26 @@
+# /etc/systemd/system/risk-watchdog.timer
+# 每 60 秒执行一次 watchdog。
+#
+# 安装：
+#   sudo cp deploy/risk-watchdog.service deploy/risk-watchdog.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now risk-watchdog.timer
+#   systemctl list-timers risk-watchdog.timer
+#   journalctl -u risk-watchdog -f          # 观察四层探活日志（不含任何密钥）
+#
+# 回滚（不影响任何容器）：
+#   sudo systemctl disable --now risk-watchdog.timer
+#   sudo rm -f /etc/systemd/system/risk-watchdog.{service,timer}
+#   sudo systemctl daemon-reload
+#   rm -f /opt/risk-dashboard/data/watchdog_state.json
+[Unit]
+Description=小鱼交易台 - 每 60s 触发 IB Gateway watchdog
+
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=60
+AccuracySec=5s
+Unit=risk-watchdog.service
+
+[Install]
+WantedBy=timers.target

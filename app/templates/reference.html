@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}口径与规则 · 小鱼交易台{% endblock %}
+{% block content %}
+
+<h2>三种盈亏口径<span class="h2sub">看板上三个盈亏数字，说的不是同一件事</span></h2>
+<div class="cards wide">
+  {% for b in pnl_bases %}
+  <div class="card">
+    <div class="k">{{ b.label }}</div>
+    <dl class="kv" style="margin:8px 0 0">
+      <dt>统计范围</dt><dd>{{ b.scope }}</dd>
+      <dt>包含内容</dt><dd>{{ b.content }}</dd>
+      <dt>数据来源</dt><dd>{{ b.source }}</dd>
+      <dt>重置方式</dt><dd>{{ b.reset }}</dd>
+    </dl>
+  </div>
+  {% endfor %}
+</div>
+<div class="banner-run crit" style="margin-top:8px">
+  <span class="flag" style="font-size:13px">⚠️ {{ pnl_bases_warning }}</span>
+</div>
+
+<h2>已实现盈亏的佣金口径<span class="h2sub">这里最容易算错</span></h2>
+<div class="panel">
+  <p class="muted" style="margin:0 0 8px;line-height:1.7">
+    IBKR 的 <code>realizedPNL</code> 口径为
+    <strong>（卖价 − 持仓均价）× 数量 − 卖出佣金</strong>。
+    <strong>买入佣金已经计入持仓均价</strong>（averageCost），不作为单独一项出现。
+  </p>
+  <p class="flag" style="margin:0;line-height:1.7">
+    因此「净盈亏 = 毛盈亏 − 双边佣金」这个公式在 IBKR 口径下<strong>必然算错</strong>：
+    买入佣金会被扣两次。本看板不使用该公式，佣金仅作成本信息展示。
+  </p>
+</div>
+
+<h2>三种计数<span class="h2sub">order / execution / decision 不可混用</span></h2>
+<div class="cards wide">
+  <div class="card">
+    <div class="k">order（委托）</div>
+    <div class="sub" style="margin-top:6px">一次下单指令。当前 IBKR 网关的
+      <code>reqCompletedOrders</code> 始终超时，手动下的单拿不到，因此
+      <strong>不用于任何规则</strong>。</div>
+  </div>
+  <div class="card">
+    <div class="k">execution（成交回报）</div>
+    <div class="sub" style="margin-top:6px">一次成交回报。一个决策被拆成多笔部分成交时会有多条。
+      <strong>仅作审计展示</strong>。</div>
+  </div>
+  <div class="card">
+    <div class="k">decision（主动交易决策）</div>
+    <div class="sub" style="margin-top:6px">一次主动交易决策，键为
+      <code>COALESCE(decision_id, perm_id)</code>。同一决策的多笔部分成交只算一次。
+      <strong>R4 / R5 用的就是它</strong>。</div>
+  </div>
+</div>
+<p class="muted" style="margin-top:8px;line-height:1.7">
+  决策类型按<strong>成交前后的有符号持仓</strong>判定，而不是买卖方向 ——
+  空头账户里 BUY 是减仓。类型分为
+  OPEN（0→非0）、ADD（同向加仓）、REDUCE（同向减仓）、CLOSE（非0→0）、
+  REVERSAL（方向翻转，单独标记）。无法还原成交前持仓时标为 UNKNOWN，
+  R4 返回「数据不足」而不是硬算。
+</p>
+
+<h2>风控规则 R1–R7<span class="h2sub">阈值实时读自规则引擎配置</span></h2>
+<div class="panel">
+  {% for r in rules %}
+  <div class="ref-rule" style="border-left-color:{{ 'var(--crit)' if 'CRIT' in r.severity else 'var(--warn)' }}">
+    <h4>
+      <span class="tag {{ 'crit' if 'CRIT' in r.severity else 'warn' }}">{{ r.id }}</span>
+      {{ r.name }}
+      <span class="muted" style="font-weight:400;font-size:12px">· {{ r.severity }}</span>
+    </h4>
+    <dl class="kv" style="margin:4px 0 0">
+      <dt>触发条件</dt><dd><strong>{{ r.threshold }}</strong></dd>
+      <dt>为什么管它</dt><dd class="why">{{ r.why }}</dd>
+      <dt>数据来源</dt><dd class="muted">{{ r.source }}</dd>
+      <dt>口径说明</dt><dd class="muted">{{ r.note }}</dd>
+    </dl>
+  </div>
+  {% endfor %}
+</div>
+
+<h2>规则状态的含义</h2>
+<div class="panel">
+  <dl class="kv">
+    <dt><span class="ok">正常（OK）</span></dt><dd>已用足够质量的数据判定过，未触发。</dd>
+    <dt><span class="flag">触发（TRIGGERED）</span></dt><dd>命中阈值，已产生告警。</dd>
+    <dt><span style="color:var(--warn)">未判定（NOT_EVALUATED）</span></dt>
+      <dd>行情质量不足以执行判断（例如盘后只有收盘冻结价）。
+        <strong>这不等于「无风险」</strong> —— 拿昨天的收盘价宣布今天没跌破止损，与误报同样是谎报。</dd>
+    <dt><span style="color:var(--warn)">部分判定（PARTIALLY_EVALUATED）</span></dt>
+      <dd>部分标的已判定，部分因质量不足未判定。两者都会在规则日志里列出。</dd>
+    <dt><span style="color:var(--warn)">数据不足 / 行情过期</span></dt>
+      <dd>缺少必要输入或行情时间戳过期，同样不给结论。</dd>
+    <dt><span class="muted">跳过（SKIPPED）</span></dt><dd>规则不适用，例如未配置板块映射表。</dd>
+  </dl>
+</div>
+
+<h2>告警通知节奏<span class="h2sub">评估每分钟一次，通知只在状态变化时发出</span></h2>
+<div class="panel">
+  <dl class="kv">
+    <dt>首次触发</dt><dd>立即通知</dd>
+    <dt>严重度升级</dt><dd>立即通知（WARN → CRIT）</dd>
+    <dt>实际值显著恶化</dt><dd>立即通知（绝对变化 ≥ 5 个百分点，或相对变化 ≥ 20%，可配置）</dd>
+    <dt>持续存在</dt><dd>每个美东交易日一次摘要</dd>
+    <dt>恢复正常</dt><dd>立即通知</dd>
+    <dt>恢复后再触发</dt><dd>立即通知</dd>
+  </dl>
+  <p class="muted" style="margin:8px 0 0">
+    规则评估仍然每分钟完整记录到审计日志 —— 少发的是通知，不是记录。
+  </p>
+</div>
+{% endblock %}

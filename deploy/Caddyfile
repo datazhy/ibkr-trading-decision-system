@@ -1,0 +1,24 @@
+# HTTPS reverse proxy for the dashboard.
+#
+# Required environment variables:
+#   DASHBOARD_SITE  Hostname only, for example dashboard.example.com
+#   CF_API_TOKEN    Cloudflare token with DNS edit access for the zone
+#
+# Application authentication is controlled by DASHBOARD_AUTH_ENABLED. Enable it
+# and set a password with `python manage.py webpass` before internet exposure.
+
+{$DASHBOARD_SITE} {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+	}
+
+	encode gzip
+
+	header {
+		X-Robots-Tag "noindex, nofollow"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	reverse_proxy web:8000
+}

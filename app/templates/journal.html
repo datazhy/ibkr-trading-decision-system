@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}投资日记 · 小鱼交易台{% endblock %}
+{% block content %}
+<h2>投资日记<span class="h2sub">记录投资心得，最新在上 · 共 {{ entries | length }} 条</span></h2>
+
+{# ---- 写入框 ---- #}
+<form class="jr-compose" method="post" action="/journal">
+  <textarea name="content" rows="4" maxlength="20000"
+            placeholder="使用 Markdown 写下交易复盘、市场观察或投资心得…（Ctrl/⌘ + Enter 发送）"></textarea>
+  <div class="jr-compose-foot">
+    <span class="muted">支持 Markdown：标题、粗体、列表、引用、链接、代码、表格</span>
+    <button class="btn" type="submit">发送</button>
+  </div>
+</form>
+
+{# ---- 日记列表 ---- #}
+{% if entries %}
+<div class="jr-list">
+  {% for e in entries %}
+  <article class="jr-card" id="e{{ e.id }}">
+    <div class="jr-meta">
+      <span class="jr-time">{{ e.updated_disp }}</span>
+      {% if e.edited %}<span class="jr-edited">已编辑</span>
+        <span class="muted jr-created">· 创建于 {{ e.created_disp }}</span>{% endif %}
+      {% if e.source_type == 'POSITION_PLAN_ARCHIVE' %}
+        <span class="tag">持仓周期归档 · 只读</span>
+      {% endif %}
+      <span class="jr-actions">
+        {% if e.position_cycle_id %}<a class="jr-link" href="/position-plans/{{ e.position_cycle_id }}">查看周期</a>{% endif %}
+        {% if not e.is_readonly %}
+        <a href="#" class="jr-link" data-edit="{{ e.id }}">编辑</a>
+        <form method="post" action="/journal/delete" class="jr-del"
+              onsubmit="return confirm('确定删除这条日记？此操作不可撤销。')">
+          <input type="hidden" name="id" value="{{ e.id }}">
+          <button type="submit" class="jr-link jr-danger">删除</button>
+        </form>
+        {% endif %}
+      </span>
+    </div>
+    <div class="jr-body" data-body="{{ e.id }}" data-collapse="{{ '0' if loop.first else '1' }}">{{ e.content_html }}</div>
+    {% if not loop.first %}<button type="button" class="jr-expand" data-expand="{{ e.id }}" hidden>展开全文</button>{% endif %}
+    {# 内联编辑表单，默认隐藏 #}
+    {% if not e.is_readonly %}
+    <form method="post" action="/journal/edit" class="jr-editform" data-editform="{{ e.id }}">
+      <input type="hidden" name="id" value="{{ e.id }}">
+      <textarea name="content" rows="4" maxlength="20000">{{ e.content }}</textarea>
+      <div class="jr-compose-foot">
+        <a href="#" class="jr-link" data-cancel="{{ e.id }}">取消</a>
+        <button class="btn" type="submit">保存</button>
+      </div>
+    </form>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="panel"><p class="muted">还没有日记。在上面的空白框里写下第一条投资心得吧。</p></div>
+{% endif %}
+
+<script>
+(function(){
+  // Ctrl/⌘ + Enter 提交所在表单
+  document.addEventListener('keydown', function(ev){
+    if((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter'){
+      var ta = document.activeElement;
+      if(ta && ta.tagName === 'TEXTAREA' && ta.form){ ta.form.requestSubmit ? ta.form.requestSubmit() : ta.form.submit(); }
+    }
+  });
+  // 编辑 / 取消 切换
+  document.addEventListener('click', function(ev){
+    var t = ev.target;
+    if(t.dataset && t.dataset.edit != null){
+      ev.preventDefault();
+      var id = t.dataset.edit;
+      document.querySelector('[data-body="'+id+'"]').style.display = 'none';
+      var f = document.querySelector('[data-editform="'+id+'"]');
+      f.style.display = 'block';
+      f.querySelector('textarea').focus();
+    } else if(t.dataset && t.dataset.cancel != null){
+      ev.preventDefault();
+      var id = t.dataset.cancel;
+      document.querySelector('[data-editform="'+id+'"]').style.display = 'none';
+      document.querySelector('[data-body="'+id+'"]').style.display = '';
+    } else if(t.dataset && t.dataset.expand != null){
+      var body=document.querySelector('[data-body="'+t.dataset.expand+'"]');
+      var collapsed=body.classList.toggle('is-collapsed');
+      t.textContent=collapsed?'展开全文':'收起';
+    }
+  });
+  document.querySelectorAll('.jr-body[data-collapse="1"]').forEach(function(body){
+    if(body.scrollHeight>480){
+      body.classList.add('is-collapsed');
+      var btn=document.querySelector('[data-expand="'+body.dataset.body+'"]');
+      if(btn)btn.hidden=false;
+    }
+  });
+})();
+</script>
+{% endblock %}

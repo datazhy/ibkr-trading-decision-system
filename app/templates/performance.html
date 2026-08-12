@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}规则效果 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set d = data %}
+<style>
+  .datanote{border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:8px;padding:10px 14px;margin:10px 0;font-size:12px;line-height:1.7;
+    background:var(--panel)}
+  .datanote b{color:var(--fg)}
+  .ptbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
+  .ptbl th{text-align:left;font-size:11px;color:var(--muted);font-weight:500;
+    padding:6px 7px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .ptbl td{padding:7px;border-bottom:1px solid var(--line);vertical-align:top;
+    font-variant-numeric:tabular-nums}
+  .ptbl tr:hover td{background:var(--panel2)}
+  .ptbl .rule{font-weight:600;font-size:12px}
+  .ptbl .sub{color:var(--muted);font-size:11px}
+  .conf{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;
+    border-radius:7px;border:1px solid}
+  .conf-strong{color:var(--good);border-color:var(--good)}
+  .conf-mod{color:var(--accent);border-color:var(--accent)}
+  .conf-low{color:var(--warn);border-color:var(--warn)}
+  /* 样本不足：灰色，绝不给绿色高分的错觉 */
+  .conf-none{color:var(--muted);border-color:var(--line);background:var(--panel2)}
+  .nosample{color:var(--muted);font-style:italic}
+  .rec{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    margin-bottom:10px;background:var(--panel)}
+  .rec h4{margin:0 0 4px;font-size:13px;display:flex;gap:8px;align-items:center}
+  .rectag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:7px;border:1px solid}
+  .rec-keep{color:var(--good);border-color:var(--good)}
+  .rec-raise{color:var(--warn);border-color:var(--warn)}
+  .rec-lower{color:var(--accent);border-color:var(--accent)}
+  .rec-none,.rec-unstable{color:var(--muted);border-color:var(--line)}
+  .rec ul{margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.7}
+  .rec .cost{color:var(--warn)}
+  .rec .concl{margin-top:8px;font-size:12px;font-weight:600}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .filters select{font-size:12px;padding:4px 8px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+  .cbox{border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+    margin-bottom:8px;background:var(--panel);font-size:12px}
+  .cbox .members{color:var(--muted);font-size:11px}
+  .warnbox{border:1px solid var(--warn);border-radius:8px;padding:10px 14px;
+    font-size:12px;line-height:1.7;background:color-mix(in srgb,var(--warn) 7%,var(--panel))}
+  .evidence-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0}
+  .evidence{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel)}
+  .evidence h3{font-size:13px;margin:0 0 8px}.evidence .big{font-size:22px;font-weight:650}
+  .evidence .line{font-size:12px;line-height:1.7}.evidence .note{font-size:11px;color:var(--muted);margin-top:7px}
+  @media(max-width:850px){.evidence-grid{grid-template-columns:1fr}}
+</style>
+
+<h2>规则效果<span class="h2sub">{{ d.summary.window }} 交易日窗口 · {{ d.summary.rows }} 条统计</span></h2>
+
+<div class="datanote">
+  <b>数据基础：</b>{{ d.data_note.note }}
+  交易日历覆盖 {{ d.data_note.trading_days }} 个交易日（{{ d.data_note.calendar_start }} → {{ d.data_note.calendar_end }}）。<br>
+  <b>怎么读这张表：</b>precision 高不代表规则一定好（可能一年只触发两次）；
+  recall 高但每天报警也不可用（用户会关掉通知）。样本量低于 {{ d.min_samples }} 时
+  一律显示「样本不足」而不给数字 —— 3 个样本算出的 100% 说明不了任何事。
+</div>
+
+{% set p4 = d.phase4 %}
+<h2>执行与纪律证据<span class="h2sub">所有比率均显示 n；少于 {{ p4.min_conclusion_samples }} 个样本不下效果结论</span></h2>
+<div class="evidence-grid">
+  <div class="evidence">
+    <h3>计划执行率 · n={{ p4.plan.triggered_n }}</h3>
+    <div class="big">{{ pct(p4.plan.completion_rate) if p4.plan.completion_rate is not none else '—' }}</div>
+    <div class="line">正式 action {{ p4.plan.formal_actions }} · 已触发 {{ p4.plan.triggered_n }} ·
+      人工确认 {{ p4.plan.confirmed_n }} · 成交完成 {{ p4.plan.completed_n }}</div>
+    <div class="line">计划内成交 {{ p4.plan.matched_executions }} · 计划外 {{ p4.plan.outside_executions }} ·
+      待确认 {{ p4.plan.pending_executions }}</div>
+    <div class="note">{{ p4.plan.definition }}{% if not p4.plan.enough_samples %}<br><b>样本不足，不据此评价计划质量。</b>{% endif %}</div>
+  </div>
+  <div class="evidence">
+    <h3>计划外执行 · n={{ p4.violations.plan_observed_n }}</h3>
+    <div class="big">{{ pct(p4.violations.plan_violation_rate) if p4.violations.plan_violation_rate is not none else '—' }}</div>
+    <div class="line">已人工定性计划外 {{ p4.violations.plan_violations }} ·
+      尚待人工确认 {{ p4.violations.pending_plan_n }}</div>
+    <div class="line">可追溯建议 {{ p4.violations.recommendation_observed_n }} ·
+      无建议观测 {{ p4.violations.recommendation_unobserved_n }}</div>
+    <div class="note">待确认与无建议观测不进入违反分母。</div>
+  </div>
+  <div class="evidence">
+    <h3>护栏违反 · n={{ p4.violations.guard_observed_n }}</h3>
+    <div class="big">{{ p4.violations.guard_violations }}</div>
+    <div class="line">硬约束样本 {{ p4.violations.hard_observed_n }} · 硬约束违反 {{ p4.violations.hard_violations }}</div>
+    <div class="line">主动 REDUCE/EXIT {{ p4.violations.proactive_reduce_n }}（只记降险事实）</div>
+    <div class="note">{{ p4.violations.note }}{% if not p4.violations.enough_samples %}<br><b>样本不足，不声称护栏有效或无效。</b>{% endif %}</div>
+  </div>
+</div>
+
+{% if p4.violations.rules %}
+<table class="ptbl">
+  <thead><tr><th>护栏来源</th><th>可观测 n</th><th>违反</th><th>违反率</th><th>结论资格</th></tr></thead>
+  <tbody>{% for r in p4.violations.rules %}<tr>
+    <td>{{ r.rule }}</td><td>{{ r.observed_n }}</td><td>{{ r.violations }}</td>
+    <td>{{ pct(r.violation_rate) if r.violation_rate is not none else '—' }}</td>
+    <td>{{ '可观察趋势' if r.enough_samples else '样本不足' }}</td>
+  </tr>{% endfor %}</tbody>
+</table>
+{% endif %}
+
+<h2>Recommendation 前向结果<span class="h2sub">{{ p4.recommendation_outcomes.window }} 交易日 · 描述性统计，不是胜率</span></h2>
+<div class="datanote">{{ p4.recommendation_outcomes.note }} 当前已完成窗口 n={{ p4.recommendation_outcomes.completed_n }}，
+  recommendation 复盘总数 {{ p4.recommendation_outcomes.reviews_total }}。</div>
+{% if p4.recommendation_outcomes.actions %}
+<table class="ptbl">
+  <thead><tr><th>动作</th><th>已完成 n</th><th>窗口未走完</th><th>平均标的结果</th><th>平均最大不利</th><th>平均账户变化</th><th>来源引用</th></tr></thead>
+  <tbody>{% for r in p4.recommendation_outcomes.actions %}<tr>
+    <td><div class="rule">{{ r.action }}</div>{% if not r.enough_samples %}<div class="sub">样本不足，不下结论</div>{% endif %}</td>
+    <td>{{ r.sample_n }}</td><td>{{ r.pending_n }}</td>
+    <td>{{ pct(r.avg_position_return) if r.avg_position_return is not none else '—' }}</td>
+    <td>{{ pct(r.avg_position_mae) if r.avg_position_mae is not none else '—' }}</td>
+    <td>{{ pct(r.avg_account_change) if r.avg_account_change is not none else '—' }}</td>
+    <td><div class="sub">{{ r.references | join(' · ') if r.references else '—' }}</div></td>
+  </tr>{% endfor %}</tbody>
+</table>
+{% else %}
+<p style="color:var(--muted);font-size:13px">尚无 recommendation 前向结果；窗口未走完时不会提前生成结论。</p>
+{% endif %}
+
+{% if d.summary.rules_with_samples == 0 %}
+<div class="warnbox">
+  ⚠ <b>当前没有任何规则积累到足够样本。</b>
+  风险事件运营层刚上线，尚无走完观察窗口的 episode。
+  下方表格展示的是已登记的规则与其样本进度，<b>不构成任何效果结论</b>，
+  也不足以支持调整线上阈值。
+</div>
+{% endif %}
+
+<form class="filters" method="get">
+  <select name="window" onchange="this.form.submit()">
+    {% for w in d.windows %}
+    <option value="{{ w }}" {{ 'selected' if d.filters.window == w }}>{{ w }} 交易日窗口</option>
+    {% endfor %}
+  </select>
+  <select name="label" onchange="this.form.submit()">
+    <option value="">全部结果标签</option>
+    {% for l in d.labels %}
+    <option value="{{ l.label_code }}" {{ 'selected' if d.filters.label == l.label_code }}>{{ l.definition }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+{% if not d.performance %}
+<p style="color:var(--muted);font-size:13px">尚无规则效果统计。需要先积累事件复盘。</p>
+{% else %}
+<table class="ptbl">
+  <thead><tr>
+    <th>规则</th><th>样本</th><th>每月触发</th><th>precision</th><th>recall</th>
+    <th>假阳性率</th><th>平均提前量</th><th>提前量分类</th><th>平均最大不利</th>
+    <th>通知效率</th><th>置信</th><th>当前阈值</th><th>参考分</th>
+  </tr></thead>
+  <tbody>
+  {% for p in d.performance %}
+  <tr>
+    <td><div class="rule">{{ p.rule_code }}</div>
+        <div class="sub">{{ p.source_type }} · {{ p.outcome_label }}</div></td>
+    <td>{{ p.sample_size }}<div class="sub">复盘 {{ p.episodes_reviewed }}/{{ p.episodes_total }}</div></td>
+    <td>{{ p.triggers_per_month or '—' }}</td>
+    <td class="{{ '' if p.enough_samples else 'nosample' }}">{{ p.precision_display }}</td>
+    <td class="{{ '' if p.enough_samples else 'nosample' }}">{{ p.recall_display }}</td>
+    <td>{{ p.fpr_display }}</td>
+    <td>{{ p.lead_days_display }}</td>
+    <td>{{ p.lead_label }}</td>
+    <td>{{ p.mae_display }}</td>
+    <td>{{ num(p.notifications_per_hit) if p.notifications_per_hit is not none else '—' }}<div class="sub">共 {{ p.notifications_total }} 条</div></td>
+    <td><span class="conf {{ p.conf_css }}">{{ p.conf_label }}</span></td>
+    <td>{{ num(p.current_threshold) if p.current_threshold is not none else '—' }}</td>
+    <td>{{ p.score_display }}
+      {% if p.enough_samples and p.components %}
+      <div class="sub">
+        P {{ num(p.components.precision_component) if p.components.precision_component is not none else '—' }} ·
+        R {{ num(p.components.recall_component) if p.components.recall_component is not none else '—' }} ·
+        L {{ num(p.components.lead_time_component) if p.components.lead_time_component is not none else '—' }}
+        {% if p.components.noise_penalty %} · 噪音 {{ num(p.components.noise_penalty) }}{% endif %}
+      </div>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="sub" style="color:var(--muted);font-size:11px;margin-top:8px">
+  参考分只用于排序，其构成（precision / recall / 提前量 / 噪音惩罚）已在每行展开。
+  <b>它不得用来自动决定线上阈值。</b>
+</p>
+{% endif %}
+
+<h2>阈值建议<span class="h2sub">系统只生成建议，永不修改线上配置</span></h2>
+{% if not d.recommendations %}
+<p style="color:var(--muted);font-size:13px">
+  尚无回测结果。运行一次回测后这里会给出每条规则的建议及其代价。
+</p>
+{% else %}
+<div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+  {% for k, v in d.rec_summary.items() %}{{ k }}: {{ v }}&nbsp;&nbsp;{% endfor %}
+</div>
+{% for r in d.recommendations %}
+<div class="rec">
+  <h4>{{ r.rule_code }}
+    <span class="rectag {{ r.rec_css }}">{{ r.rec_label }}</span>
+    <span class="sub" style="font-weight:400;color:var(--muted)">
+      当前阈值 {{ r.current_threshold or '—' }} · 样本 {{ r.sample_size }}</span>
+  </h4>
+  {% if r.reasons %}<ul>{% for x in r.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+  {% if r.risks %}<ul class="cost">{% for x in r.risks %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+  <div class="concl">{{ r.conclusion }}</div>
+</div>
+{% endfor %}
+{% endif %}
+
+<h2>规则组合<span class="h2sub">组合通常提高 precision、降低 recall，两者一并展示</span></h2>
+{% if not d.combos %}
+<p style="color:var(--muted);font-size:13px">尚无组合分析结果。</p>
+{% else %}
+{% for c in d.combos %}
+<div class="cbox">
+  <b>{{ c.combo_code }}</b>
+  <span class="conf {{ 'conf-none' if c.confidence == 'insufficient' else 'conf-mod' }}">{{ c.conf_label }}</span>
+  <div class="members">成员规则：{{ c.members | join(' + ') }}</div>
+  <div style="margin-top:5px">
+    触发 {{ c.combo_triggers }} 次 · precision {{ c.precision_display }} ·
+    recall {{ c.recall_display }}
+    {% if c.recall_delta %}
+    <span style="color:var(--warn)">（相对最优单规则召回变化 {{ c.recall_delta_display }}）</span>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if d.backtest_run %}
+<p style="color:var(--muted);font-size:11px;margin-top:14px">
+  最近回测 {{ d.backtest_run.backtest_run_id[:12] }} ·
+  区间 {{ d.backtest_run.date_start }} → {{ d.backtest_run.date_end }} ·
+  状态 {{ d.backtest_run.status }} ·
+  训练期截至 {{ d.backtest_run.train_end or '—' }}
+</p>
+{% endif %}
+{% endblock %}

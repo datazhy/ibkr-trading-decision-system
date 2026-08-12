@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}风险事件 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set s = data.summary %}
+{% set t = data.trends %}
+
+<style>
+  .evt-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+  .evt-sum .card .v{font-size:24px}
+  .evt-sum .card.z .v{color:var(--muted)}
+  .trend-box{margin-top:6px}
+  .trend-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .trend-cell{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel)}
+  .trend-cell h4{margin:0 0 2px;font-size:12px;font-weight:600}
+  .trend-cell .axis{font-size:10px;color:var(--muted);margin-bottom:6px}
+  .trend-cell svg{width:100%;height:90px;display:block}
+  .trend-cell .now{font-size:19px;font-weight:600;font-variant-numeric:tabular-nums}
+  .rng{display:flex;gap:4px;flex-wrap:wrap}
+  .rng a{font-size:12px;padding:3px 10px;border-radius:7px;border:1px solid var(--line);
+    color:var(--muted);text-decoration:none}
+  .rng a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .gapnote{font-size:11px;color:var(--warn);margin-top:6px}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+  .filters select,.filters button{font-size:12px;padding:4px 8px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+  .evtbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+  .evtbl th{text-align:left;font-size:11px;color:var(--muted);font-weight:500;
+    padding:6px 8px;border-bottom:1px solid var(--line)}
+  .evtbl td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .evtbl tr:hover td{background:var(--panel2)}
+  .evtbl .ttl{font-weight:600}
+  .evtbl .exp{color:var(--muted);font-size:11px;line-height:1.5;margin-top:2px;
+    max-width:42ch}
+  .evtbl .chk{color:var(--muted);font-size:11px;line-height:1.5;margin-top:3px}
+  .stbadge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;
+    padding:2px 8px;border-radius:8px;border:1px solid var(--line);white-space:nowrap}
+  .stbadge.st-open{color:var(--crit);border-color:var(--crit)}
+  .stbadge.st-ack{color:var(--warn);border-color:var(--warn)}
+  .stbadge.st-resolved{color:var(--good);border-color:var(--good)}
+  .stbadge.st-suppressed{color:var(--muted)}
+  .srcchip{font-size:10px;color:var(--muted);border:1px solid var(--line);
+    border-radius:6px;padding:1px 6px}
+  .pager{display:flex;gap:6px;align-items:center;margin-top:12px;font-size:12px}
+  .pager a{padding:3px 10px;border:1px solid var(--line);border-radius:7px;
+    color:var(--muted);text-decoration:none}
+  .oldest{font-size:12px;color:var(--muted);margin-top:8px}
+  .legend{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6}
+  @media(max-width:768px){
+    .evt-sum{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .trend-row{grid-template-columns:1fr}
+    .trend-cell svg{height:72px}
+    .filters select{width:100%}
+  }
+</style>
+
+<h2>风险摘要<span class="h2sub">账户 · 市场 · 联合 统一时间线</span></h2>
+<div class="evt-sum">
+  <div class="card risk {{ 'crit' if s.open_critical else '' }}">
+    <div class="k">进行中 · 严重</div>
+    <div class="v {{ 'crit-num' if s.open_critical }}">{{ s.open_critical }}</div>
+  </div>
+  <div class="card risk {{ 'warn' if s.open_high else '' }}">
+    <div class="k">进行中 · 高风险</div>
+    <div class="v">{{ s.open_high }}</div>
+  </div>
+  <div class="card">
+    <div class="k">进行中 · 警告</div>
+    <div class="v">{{ s.open_warning }}</div>
+    <div class="sub">默认不推送，仅进时间线</div>
+  </div>
+  <div class="card">
+    <div class="k">今日新增</div><div class="v">{{ s.opened_today }}</div>
+  </div>
+  <div class="card">
+    <div class="k">今日恢复</div><div class="v">{{ s.resolved_today }}</div>
+  </div>
+</div>
+{% if s.oldest %}
+<div class="oldest">最久未恢复：<b>{{ s.oldest.title }}</b>（{{ s.oldest.source_label }} ·
+  已持续 {{ s.oldest.age }} · 自 {{ s.oldest.first_abs }}）</div>
+{% endif %}
+
+<h2>风险趋势<span class="h2sub">聚合粒度 {{ t.interval_label }} · 时区 {{ tzname }}</span></h2>
+<div class="rng">
+  {% for key, label in data.range_options %}
+  <a href="?range={{ key }}" class="{{ 'on' if t.range == key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+<div class="trend-box trend-row">
+  <div class="trend-cell">
+    <h4>账户风险评分</h4>
+    <div class="axis">0–100，越高越危险 · 我的账户结构本身有多脆弱</div>
+    <div class="now">{{ t.account[-1].v if t.account else '—' }}</div>
+    {% if data.account_spark %}
+    <svg viewBox="0 0 560 90" preserveAspectRatio="none">
+      <polyline points="{{ data.account_spark }}" fill="none"
+                stroke="var(--accent)" stroke-width="2"/>
+    </svg>
+    {% else %}<div class="axis">数据点不足，暂无趋势</div>{% endif %}
+  </div>
+  <div class="trend-cell">
+    <h4>市场风险评分</h4>
+    <div class="axis">0–100，越高越不友好 · 外部环境（按交易日，粒度为天）</div>
+    <div class="now">{{ t.market[-1].v if t.market else '—' }}</div>
+    {% if data.market_spark %}
+    <svg viewBox="0 0 560 90" preserveAspectRatio="none">
+      <polyline points="{{ data.market_spark }}" fill="none"
+                stroke="var(--warn)" stroke-width="2"/>
+    </svg>
+    {% else %}<div class="axis">数据点不足，暂无趋势</div>{% endif %}
+  </div>
+  <div class="trend-cell">
+    <h4>联合放大系数</h4>
+    <div class="axis">倍数，与上面两项量纲不同，故单独一栏</div>
+    <div class="now">
+      {% if t.amplification and t.amplification[-1].risk_amplification_factor %}
+        ×{{ t.amplification[-1].risk_amplification_factor }}
+      {% else %}—{% endif %}
+    </div>
+    <div class="axis" style="margin-top:8px">
+      账户 {{ t.amplification[-1].account_level if t.amplification else '—' }} ·
+      市场 {{ t.amplification[-1].market_state if t.amplification else '—' }}
+    </div>
+  </div>
+</div>
+{% if t.has_gaps %}
+<div class="gapnote">⚠ 该区间存在 {{ t.gaps | length }} 段数据缺失，趋势线在缺口处不代表实际取值。</div>
+{% endif %}
+<div class="legend">
+  聚合说明：每个时间桶取<b>桶末值</b>画线，等级取<b>桶内最高</b>（不是对平均分反查），
+  避免平均把短时的 critical 尖峰抹平。原始数据不删除，聚合只发生在查询时。
+</div>
+
+<h2>事件时间线<span class="h2sub">共 {{ data.total }} 条</span></h2>
+<form class="filters desktop-only" method="get">
+  <input type="hidden" name="range" value="{{ t.range }}">
+  <select name="status" onchange="this.form.submit()">
+    {% for v, label in data.status_options %}
+    <option value="{{ v }}" {{ 'selected' if data.filters.status == v or (not data.filters.status and not v) }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <select name="source_type" onchange="this.form.submit()">
+    {% for v, label in data.source_options %}
+    <option value="{{ v }}" {{ 'selected' if data.filters.source_type == v or (not data.filters.source_type and not v) }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <select name="severity" onchange="this.form.submit()">
+    {% for v, label in data.severity_options %}
+    <option value="{{ v }}" {{ 'selected' if data.filters.severity == v or (not data.filters.severity and not v) }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <noscript><button type="submit">筛选</button></noscript>
+</form>
+<div class="mobile-only">
+  <button class="btn sec mobile-filter-trigger" type="button" data-event-filter-open>☷ 筛选风险事件</button>
+  <div class="mobile-filter-chips">
+    {% if data.filters.status %}<span class="tag">{{ data.filters.status }}</span>{% endif %}
+    {% if data.filters.source_type %}<span class="tag">{{ data.filters.source_type }}</span>{% endif %}
+    {% if data.filters.severity %}<span class="tag">{{ data.filters.severity }}</span>{% endif %}
+  </div>
+</div>
+<dialog class="mobile-sheet" id="event-filter" aria-label="风险事件筛选">
+  <div class="mobile-sheet-head"><span>筛选风险事件</span><button class="mobile-icon-btn" type="button" data-event-filter-close>✕</button></div>
+  <form method="get" style="display:grid;gap:10px">
+    <input type="hidden" name="range" value="{{ t.range }}">
+    <label>状态<select name="status">{% for v, label in data.status_options %}<option value="{{ v }}" {{ 'selected' if data.filters.status == v or (not data.filters.status and not v) }}>{{ label }}</option>{% endfor %}</select></label>
+    <label>来源<select name="source_type">{% for v, label in data.source_options %}<option value="{{ v }}" {{ 'selected' if data.filters.source_type == v or (not data.filters.source_type and not v) }}>{{ label }}</option>{% endfor %}</select></label>
+    <label>级别<select name="severity">{% for v, label in data.severity_options %}<option value="{{ v }}" {{ 'selected' if data.filters.severity == v or (not data.filters.severity and not v) }}>{{ label }}</option>{% endfor %}</select></label>
+    <button class="btn" type="submit">应用筛选</button>
+    <a class="btn sec" href="/events?range={{ t.range }}">清除筛选</a>
+  </form>
+</dialog>
+
+{% if not data.events %}
+<p style="color:var(--muted);font-size:13px">当前区间没有风险事件。</p>
+{% else %}
+<table class="evtbl desktop-only">
+  <thead><tr>
+    <th>事件</th><th>来源</th><th>级别</th><th>状态</th>
+    <th>当前值 / 阈值</th><th>影响对象</th><th>首次 / 最近</th><th>次数</th>
+  </tr></thead>
+  <tbody>
+  {% for e in data.events %}
+  <tr>
+    <td>
+      <div class="ttl"><a href="/events/{{ e.event_id }}"
+         style="color:inherit;text-decoration:none">{{ e.title }}</a></div>
+      <div class="exp">{{ clean_decimals(e.explanation) }}</div>
+      {% if e.recommended_check %}
+      <div class="chk">建议检查：{{ e.recommended_check }}</div>{% endif %}
+      {% if e.notify_note %}<div class="chk">🛈 {{ e.notify_note }}</div>{% endif %}
+    </td>
+    <td><span class="srcchip">{{ e.source_label }}</span></td>
+    <td><span class="sevtag {{ e.sev_css }}">{{ e.sev_icon }} {{ e.sev_label }}</span></td>
+    <td>
+      <span class="stbadge {{ e.status_css }}">{{ e.status_icon }} {{ e.status_label }}</span>
+      {% if e.status == 'suppressed' and e.suppressed_until %}
+      <div class="chk">抑制至 {{ e.suppressed_until[:16] }}</div>{% endif %}
+      {% if e.status == 'acknowledged' %}
+      <div class="chk">已确认，风险仍存在</div>{% endif %}
+    </td>
+    <td>{{ e.actual_display }}<br><span class="exp">阈值 {{ e.threshold_display }}</span></td>
+    <td>{{ e.affected }}</td>
+    <td>{{ e.first_abs }}<br><span class="exp">{{ e.last_rel }}</span></td>
+    <td>{{ e.occurrence_count }}<br><span class="exp">通知 {{ e.notification_count }}</span></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="mobile-card-list">
+  {% for e in data.events %}
+  <details class="mobile-data-card">
+    <summary>
+      <div class="mobile-card-head"><span class="mobile-card-title">{{ e.title }}</span><span class="sevtag {{ e.sev_css }}">{{ e.sev_icon }} {{ e.sev_label }}</span></div>
+      <div class="mobile-card-meta"><span class="stbadge {{ e.status_css }}">{{ e.status_icon }} {{ e.status_label }}</span><span>{{ e.actual_display }} / {{ e.threshold_display }}</span></div>
+    </summary>
+    <div class="mobile-card-body">
+      <p style="margin-top:0">{{ clean_decimals(e.explanation) }}</p>
+      {% if e.recommended_check %}<p class="muted">建议检查：{{ e.recommended_check }}</p>{% endif %}
+      <dl class="mobile-kv">
+        <dt>来源</dt><dd>{{ e.source_label }}</dd><dt>影响对象</dt><dd>{{ e.affected }}</dd>
+        <dt>首次发现</dt><dd>{{ e.first_abs }}</dd><dt>最近发现</dt><dd>{{ e.last_rel }}</dd>
+        <dt>发生次数</dt><dd>{{ e.occurrence_count }}</dd><dt>通知次数</dt><dd>{{ e.notification_count }}</dd>
+      </dl>
+      <a class="btn sec" style="width:100%;margin-top:10px" href="/events/{{ e.event_id }}">查看事件详情</a>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+<div class="pager">
+  {% set filter_qs = '&status=' ~ data.filters.status if data.filters.status else '' %}
+  {% set filter_qs = filter_qs ~ ('&source_type=' ~ data.filters.source_type if data.filters.source_type else '') %}
+  {% set filter_qs = filter_qs ~ ('&severity=' ~ data.filters.severity if data.filters.severity else '') %}
+  {% if data.page > 1 %}
+  <a href="?range={{ t.range }}{{ filter_qs }}&page={{ data.page - 1 }}">上一页</a>{% endif %}
+  <span>第 {{ data.page }} / {{ data.pages }} 页</span>
+  {% if data.page < data.pages %}
+  <a href="?range={{ t.range }}{{ filter_qs }}&page={{ data.page + 1 }}">下一页</a>{% endif %}
+</div>
+{% endif %}
+<script>
+(function(){var d=document.getElementById('event-filter'),o=document.querySelector('[data-event-filter-open]'),c=document.querySelector('[data-event-filter-close]');if(o&&d)o.addEventListener('click',function(){d.showModal();});if(c&&d)c.addEventListener('click',function(){d.close();});})();
+</script>
+{% endblock %}

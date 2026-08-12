@@ -1,0 +1,38 @@
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+!.env.example.zh-CN
+secrets/
+*.token
+token*.json
+*.key
+*.pem
+
+# Runtime financial data
+data/
+backups/
+*.db
+*.db-*
+*.log
+*.log.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Generated/private operational reports (never publish)
+artifacts/
+docs/evidence/
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,894 @@
+{% extends "base.html" %}
+{% block title %}概览 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set c = data.counters %}
+{% set p = data.pnl %}
+{% set rk = data.risk %}
+<style>
+  .mobile-dstate{display:none}
+  @media(max-width:768px){
+    .mobile-dstate{display:block;border:1px solid var(--line);border-left:3px solid var(--good);
+      border-radius:11px;background:var(--panel);margin-bottom:14px}
+    .mobile-dstate.warn{border-left-color:var(--warn)}.mobile-dstate.crit{border-left-color:var(--crit)}
+    .mobile-dstate>summary{list-style:none;min-height:52px;padding:10px 12px;
+      display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer}
+    .mobile-dstate>summary::-webkit-details-marker{display:none}
+    .mobile-dstate .body{padding:0 12px 12px;font-size:13px}
+    .drivers .driver-extra{display:none}
+    .riskgrid{gap:8px}.risklevel{font-size:20px}
+    .riskcards{display:none}
+    .posfilter{padding-left:0!important;padding-right:0!important}
+    .position-mobile-card.crit{border-left:3px solid var(--crit)}
+    .position-mobile-card.warn{border-left:3px solid var(--warn)}
+  }
+</style>
+{% if c.cooldown_active %}
+  <div class="banner">🔴 冷静期进行中{% if c.cooldown_ends %}（至 {{ c.cooldown_ends }}）{% endif %} —— 请谨慎交易，任何新成交都会被记录并提醒</div>
+{% endif %}
+
+{# ==================== 数据状态区（账户快照层 / 数据质量层） ==================== #}
+{% if dstate %}
+<div class="dstate {{ dstate.css }} desktop-only">
+  <div class="ds-main">
+    <span class="ds-badge {{ dstate.css }}">{{ dstate.icon }} {{ dstate.label }}</span>
+    <span class="ds-item"><b>数据截至</b>{{ dstate.data_as_of_abs }}
+      <span class="muted">· {{ dstate.age_text }}</span></span>
+    <span class="ds-item"><b>IBKR</b>{{ '已连接' if dstate.connected else '连接异常' }}</span>
+    <span class="ds-item"><b>最近同步</b>
+      {% if dstate.last_sync_state in ('success','READY') %}成功
+      {% elif dstate.last_sync_state == 'partial' %}部分成功
+      {% elif dstate.last_sync_state %}{{ dstate.last_sync_state }}
+      {% else %}—{% endif %}
+      {% if dstate.last_success_abs %}<span class="muted">· 上次成功 {{ dstate.last_success_abs }}</span>{% endif %}
+    </span>
+    <span class="ds-item"><b>AI 分析</b>
+      <span class="{{ 'ok' if dstate.ai_allowed else 'flag' }}">
+        {{ '✅ 允许' if dstate.ai_allowed else '⛔ 已阻止' }}</span></span>
+    {% if dstate.issues %}
+    <details class="ds-more">
+      <summary>查看数据质量问题（严重 {{ dstate.critical }} · 警告 {{ dstate.warning }}）</summary>
+      <ul class="ds-issues">
+        {% for i in dstate.issues %}
+        <li class="sev-{{ i.severity }}">
+          <span class="ds-sev {{ i.severity }}">{{ i.severity }}</span>
+          <b>{{ i.issue_code }}</b> {{ i.message }}
+          {% if i.affected_field %}<span class="muted">（字段 {{ i.affected_field }}
+            {% if i.expected_value %}· 期望 {{ i.expected_value }}{% endif %}
+            {% if i.actual_value %}· 实际 {{ i.actual_value }}{% endif %}）</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </div>
+  {% if dstate.status != 'fresh' %}
+  <div class="ds-warn">
+    {% if dstate.status == 'stale' %}
+      ⚠️ 以下为 <b>{{ dstate.data_as_of_abs }}</b> 的数据，可能已过期（{{ '交易时段' if dstate.market_open else '休市时段' }}阈值 {{ dstate.stale_threshold_min }} 分钟），<b>不是实时账户数据</b>。
+    {% else %}
+      ⛔ 数据存在严重问题，<b>不可用于可靠分析</b>：{{ dstate.ai_reason }}
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+<details class="mobile-dstate {{ dstate.css }}">
+  <summary><span class="ds-badge {{ dstate.css }}">{{ dstate.icon }} {{ dstate.label }}</span><span class="muted">{{ dstate.age_text }} · 详情 ›</span></summary>
+  <div class="body">
+    <dl class="mobile-kv"><dt>数据截至</dt><dd>{{ dstate.data_as_of_abs }}</dd><dt>IBKR</dt><dd>{{ '已连接' if dstate.connected else '连接异常' }}</dd><dt>最近同步</dt><dd>{{ dstate.last_sync_state or '—' }}</dd><dt>AI分析</dt><dd>{{ '允许' if dstate.ai_allowed else '已阻止' }}</dd></dl>
+    {% if dstate.issues %}<ul class="ds-issues">{% for i in dstate.issues %}<li class="sev-{{ i.severity }}"><b>{{ i.issue_code }}</b> {{ i.message }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+</details>
+{% endif %}
+
+{# ==================== 一、收益概览（4 张核心卡） ==================== #}
+<h2>收益概览
+  <span class="tag {{ 'good' if data.market_session == 'REGULAR' else ('warn' if data.market_session in ('PRE','POST') else '') }}"
+        style="margin-left:6px">{{ data.market_session_label }}</span></h2>
+{% set today_unreal = (p.daily - p.realized) if (p.daily is not none and p.realized is not none) else none %}
+<div class="cards pnl4">
+  <div class="card hero">
+    <div class="k">净资产</div>
+    <div class="v" data-live-balance="equity">{{ money(p.net_liquidation) }}</div>
+    <div class="sub">
+      {% if p.daily_pct.available %}
+        较上一交易日 <span class="{{ 'up' if p.daily_pct.pct >= 0 else 'down' }}">{{ pct(p.daily_pct.pct) }}</span> ·
+      {% endif %}
+      {{ rel(p.net_liq_as_of) }}
+      <details class="why-more"><summary>i</summary><div class="pop">
+        数据质量 {{ p.net_liq_quality }}<br>截至 {{ abs_time(p.net_liq_as_of) }}<br>
+        来源 IBKR NetLiquidation
+      </div></details>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="k">今日盈亏{% if p.session_is_prior_day %}（{{ p.session_date }} 交易日）{% endif %}</div>
+    <div class="v {{ 'up' if p.daily and p.daily >= 0 else ('down' if p.daily) }}">
+      <span data-live-account-pnl="daily_pnl">{{ signed(p.daily) }}</span>
+      {% if p.daily_pct.available %}<span class="sub">{{ pct(p.daily_pct.pct) }}</span>{% endif %}
+    </div>
+    <div class="sub splitline">
+      <span>已实现 <b data-live-today-realized class="{{ 'up' if p.realized and p.realized >= 0 else ('down' if p.realized) }}">{{ signed(p.realized) }}</b></span>
+      <span>未实现 <b data-live-today-unrealized class="{{ 'up' if today_unreal and today_unreal >= 0 else ('down' if today_unreal) }}">{{ signed(today_unreal) }}</b></span>
+      <details class="why-more"><summary>i</summary><div class="pop">
+        今日盈亏 = 今日已实现 + 今日浮动变化。{% if p.pnl_quality == 'DEGRADED' %}
+        券商 PnL 本轮无数据，已用持仓浮盈与净资产变动估算。{% endif %}<br>
+        来源 <span data-live-pnl-source>{{ p.pnl_source }}</span>{% if p.daily_basis %} · 口径 {{ p.daily_basis }}{% endif %}<br>
+        「未实现」是当日浮动变化，与下方「持仓浮动盈亏」（累计）口径不同，
+        <a href="/reference" style="color:var(--accent)">不能相加</a>。
+        {% if not p.daily_pct.available %}<br>百分比不可用：{{ p.daily_pct.reason }}{% endif %}
+      </div></details>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="k">持仓浮动盈亏</div>
+    <div class="v {{ 'up' if p.unrealized and p.unrealized >= 0 else ('down' if p.unrealized) }}" data-live-account-pnl="unrealized_pnl">{{ signed(p.unrealized) }}</div>
+    <div class="sub">持仓成本口径 · 时点值
+      <details class="why-more"><summary>i</summary><div class="pop">
+        当前持仓的累计浮动盈亏，随价格变动，是时点值不是窗口值。<br>
+        来源 {{ p.pnl_source }}<br>与「今日盈亏」口径不同，
+        <a href="/reference" style="color:var(--accent)">不能相加</a>。
+      </div></details>
+    </div>
+  </div>
+
+  {# 周期表现：近7日 / 历史 合并为一张卡，CSS 切换 #}
+  {% set w7 = p.windows[0] %}
+  {% set wh = p.windows[1] %}
+  <div class="card">
+    <div class="k">周期表现</div>
+    <div class="tabs periodtabs">
+      <input type="radio" name="period" id="pd-7" checked>
+      <input type="radio" name="period" id="pd-h">
+      <div class="tabbar">
+        <label class="tab" for="pd-7">{{ w7.label }}</label>
+        <label class="tab" for="pd-h">{{ wh.label }}</label>
+      </div>
+      <div class="panes">
+        {% for w in [w7, wh] %}
+        <div class="pane pane-{{ 'p7' if loop.first else 'ph' }}">
+          {% if w.status == 'INSUFFICIENT_HISTORY' %}
+            <div class="v sm muted">暂不可计算</div>
+            {% set ratio = (w.days_available / w.days) if w.days else 0 %}
+            <div class="sub">历史覆盖 {{ w.days_available }} / {{ w.days }} 天
+              <div class="bar"><span style="width:{{ (ratio * 100) | round(0, 'floor') }}%"></span></div>
+              {% if w.available_on %}预计可用日期：{{ w.available_on }}{% endif %}
+            </div>
+          {% else %}
+            <div class="v {{ 'up' if w.amount and w.amount >= 0 else ('down' if w.amount) }}">
+              {{ signed(w.amount) }}
+              {% if w.pct is not none %}<span class="sub">{{ pct(w.pct) }}</span>{% endif %}
+            </div>
+            <div class="sub">{{ w.start_date }} → {{ w.end_date }}
+              {% if w.status == 'CHANGE_ONLY' %}<br><span class="flag">{{ w.note }}</span>
+              {% elif w.note %}<br><span class="muted">{{ w.note }}</span>{% endif %}
+            </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ==================== 账户风险评估（风险计算引擎 v1） ==================== #}
+{% if risk %}
+<h2 title="基于快照 {{ risk.snapshot_id[:8] }} · {{ risk.calc_version }}">账户风险评估<span class="h2sub muted" style="cursor:help">ⓘ</span></h2>
+
+{% if not risk.reliable %}
+<div class="dstate crit" style="margin-bottom:12px">
+  <div class="ds-main"><span class="ds-badge crit">⛔ 当前数据不足以进行可靠风险判断</span></div>
+  <div class="ds-warn">{{ risk.blocked_reason }}<br>
+    以下仅展示可以安全计算的原始指标，<b>不代表账户风险为低</b>。</div>
+</div>
+{% endif %}
+
+<div class="riskgrid">
+  {# 风险总览卡 #}
+  <div class="card riskmain {{ risk.css }}">
+    <div class="k">账户风险等级</div>
+    <div class="risklevel {{ risk.css }}">{{ risk.icon }} {{ risk.level_label }}</div>
+    <div class="riskscore">
+      风险评分 <b>{{ risk.score }}</b><span class="muted">/100</span>
+      <span class="tag {{ 'good' if risk.reliable else 'crit' }}">{{ '可靠' if risk.reliable else '不可靠' }}</span>
+    </div>
+    <div class="sub">数据截至 {{ risk.data_as_of_abs }}</div>
+    <details class="desktop-only" style="margin-top:10px"><summary class="pp-link" style="cursor:pointer">技术指标与规则（HHI / 集中度 / 杠杆 / 回撤）</summary>
+    <dl class="riskkv" style="margin-top:8px">
+      <div><dt>现金比例</dt><dd>{{ risk.cash_ratio }}</dd></div>
+      <div><dt>总杠杆</dt><dd>{{ risk.gross_leverage }}</dd></div>
+      <div><dt>最大单一持仓（占总资产）</dt><dd>{{ risk.max_position_equity }}</dd></div>
+      <div><dt>最大单一持仓（占已投资）</dt><dd>{{ risk.max_position_invested }}</dd></div>
+      <div><dt>前三大集中度（占已投资）</dt><dd>{{ risk.top3_invested }}</dd></div>
+      <div><dt>有效持仓 / 名义持仓</dt>
+        <dd>{{ risk.conc.eligible_long }} / {{ risk.conc.total_position_count }}</dd></div>
+      <div><dt>集中度指数 HHI</dt><dd>{{ risk.conc.hhi }}</dd></div>
+      <div><dt>等效持仓数</dt><dd>{{ risk.conc.effective_count }}</dd></div>
+      <div><dt>最大单仓（占已投资）</dt><dd>{{ risk.conc.top1 }}</dd></div>
+      <div><dt>当前回撤</dt><dd>{{ risk.current_drawdown }}</dd></div>
+      <div><dt>维持保证金安全倍数</dt><dd>{{ risk.maint_safety }}</dd></div>
+      <div><dt>高风险规则触发</dt><dd class="{{ 'flag' if risk.high_risk_count }}">{{ risk.high_risk_count }} 条</dd></div>
+    </dl></details>
+    <details class="mobile-only" style="margin-top:10px"><summary class="btn sec" style="cursor:pointer">技术指标与规则</summary><dl class="riskkv">
+      <div><dt>现金比例</dt><dd>{{ risk.cash_ratio }}</dd></div><div><dt>总杠杆</dt><dd>{{ risk.gross_leverage }}</dd></div>
+      <div><dt>最大单仓（总资产）</dt><dd>{{ risk.max_position_equity }}</dd></div><div><dt>最大单仓（已投资）</dt><dd>{{ risk.max_position_invested }}</dd></div>
+      <div><dt>HHI</dt><dd>{{ risk.conc.hhi }}</dd></div><div><dt>等效持仓数</dt><dd>{{ risk.conc.effective_count }}</dd></div>
+      <div><dt>保证金安全倍数</dt><dd>{{ risk.maint_safety }}</dd></div><div><dt>高风险规则</dt><dd>{{ risk.high_risk_count }} 条</dd></div>
+    </dl></details>
+  </div>
+
+  {# 最大风险来源 #}
+  <div class="card">
+    <div class="k">最大风险来源{% if not risk.drivers %}（当前无触发）{% endif %}</div>
+    {% if risk.drivers %}
+    <ol class="drivers">
+      {% for dv in risk.drivers %}
+      <li class="sev-{{ dv.severity }} {{ 'driver-extra' if loop.index > 3 }}">
+        <div class="dv-head">
+          <span class="ds-sev {{ dv.severity }}">{{ dv.severity }}</span>
+          <b>{{ dv.title }}</b>
+        </div>
+        <div class="dv-num">当前 <b>{{ dv.actual_display or num(dv.actual_value) }}</b> · 阈值 {{ dv.threshold_display or '—' }}
+          {% if dv.affected_symbol %}<span class="muted">· 影响 {{ dv.affected_symbol }}</span>{% endif %}</div>
+        <div class="dv-check">建议检查：{{ dv.recommended_check }}</div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% if risk.drivers|length > 3 %}<a class="mobile-only btn sec" style="margin-top:10px" href="/events">查看全部风险</a>{% endif %}
+    {% else %}
+    <p class="muted" style="margin:8px 0 0">当前没有触发任何风险规则。</p>
+    {% endif %}
+  </div>
+</div>
+
+{# 持仓风险表：双口径并列，这是本系统的强制要求（默认折叠，展开备查）#}
+{% if risk.positions %}
+<details class="desktop-only" style="margin-top:10px"><summary class="pp-link" style="cursor:pointer">持仓风险标记表（{{ risk.positions | length }} 个标的 · 双口径）</summary>
+<div class="panel scroll" style="padding:4px 0;margin-top:8px">
+<table class="postbl">
+  <thead><tr>
+    <th>标的</th><th>市值</th><th>浮动盈亏</th>
+    <th>占已投资仓位</th><th>占账户亏损</th><th>风险等级</th><th>风险标记</th>
+  </tr></thead>
+  <tbody>
+  {% for p in risk.positions %}
+  <tr>
+    <td><span class="sym">{{ p.symbol }}</span></td>
+    <td class="cellnum">{{ risk.fmt(p.market_value, 'money') }}</td>
+    <td class="cellnum {{ 'up' if p.unrealized_pnl and p.unrealized_pnl|float >= 0 else 'down' }}">
+      {{ risk.fmt(p.unrealized_pnl, 'money') }}
+      {% if p.unrealized_pnl_percent %}<div class="sub">{{ risk.fmt(p.unrealized_pnl_percent) }}</div>{% endif %}</td>
+    <td class="cellnum"><b>{{ risk.fmt(p.weight_of_invested_capital) }}</b></td>
+    <td class="cellnum">{{ risk.fmt(p.contribution_to_total_losing_positions) }}</td>
+    <td><span class="sevtag {{ 'crit' if p.risk_level in ('critical','high') else ('warn' if p.risk_level=='warning' else 'ok') }}">
+      {{ {'critical':'严重','high':'高','warning':'关注','low':'正常'}.get(p.risk_level, p.risk_level) }}</span></td>
+    <td class="sub">{{ p.risk_flags | join(' · ') if p.risk_flags else '—' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div></details>
+<div class="mobile-card-list" style="margin-top:10px">
+  {% for p in risk.positions %}<details class="mobile-data-card"><summary><div class="mobile-card-head"><span class="mobile-card-title">{{ p.symbol }}</span><span class="sevtag {{ 'crit' if p.risk_level in ('critical','high') else ('warn' if p.risk_level=='warning' else 'ok') }}">{{ {'critical':'严重','high':'高','warning':'关注','low':'正常'}.get(p.risk_level, p.risk_level) }}</span></div><div class="mobile-card-meta"><span>仓位 {{ risk.fmt(p.weight_of_invested_capital) }}</span><span>{{ risk.fmt(p.unrealized_pnl, 'money') }}</span></div></summary><div class="mobile-card-body"><dl class="mobile-kv"><dt>市值</dt><dd>{{ risk.fmt(p.market_value, 'money') }}</dd><dt>浮动盈亏</dt><dd>{{ risk.fmt(p.unrealized_pnl, 'money') }}</dd><dt>占已投资</dt><dd>{{ risk.fmt(p.weight_of_invested_capital) }}</dd><dt>占账户亏损</dt><dd>{{ risk.fmt(p.contribution_to_total_losing_positions) }}</dd><dt>风险标记</dt><dd>{{ p.risk_flags | join(' · ') if p.risk_flags else '—' }}</dd></dl></div></details>{% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+{# 关键约束（R1/R2/R7 + 未处理告警）：原独立「风险摘要」并入此处，账户风险评估成为唯一风险汇总区 #}
+{% if rk %}
+<div class="cards riskcards" style="margin-top:10px">
+  {% set sev = 'crit' if (rk.top_ratio and rk.top_ratio > rk.top_threshold) else ('warn' if (rk.top_ratio and rk.top_ratio > rk.top_near) else 'ok') %}
+  <div class="card risk {{ sev }}">
+    <div class="k">最大单标的集中度</div>
+    <div class="v"><span class="{{ 'crit-num' if sev == 'crit' }}">{{ pct(rk.top_ratio) }}</span>
+      <span class="sevtag {{ sev }}">{{ '严重' if sev=='crit' else ('接近' if sev=='warn' else '正常') }}</span></div>
+    <div class="sub obj">{{ rk.top_symbol or '—' }}</div>
+    <div class="sub">阈值 {{ pct(rk.top_threshold) }}（R1）{% if rk.top_over and rk.top_over > 0 %} · 超出 {{ pct(rk.top_over) }}{% endif %}</div>
+  </div>
+  {% set sev = 'crit' if (rk.top_sector_ratio and rk.top_sector_ratio > rk.sector_threshold) else ('warn' if (rk.top_sector_ratio and rk.top_sector_ratio > rk.sector_near) else 'ok') %}
+  <div class="card risk {{ sev }}">
+    <div class="k">最大板块集中度</div>
+    <div class="v"><span class="{{ 'crit-num' if sev == 'crit' }}">{{ pct(rk.top_sector_ratio) }}</span>
+      <span class="sevtag {{ sev }}">{{ '严重' if sev=='crit' else ('接近' if sev=='warn' else '正常') }}</span></div>
+    <div class="sub obj">{{ rk.top_sector or '—' }}</div>
+    <div class="sub">阈值 {{ pct(rk.sector_threshold) }}（R2）{% if rk.sector_over and rk.sector_over > 0 %} · 超出 {{ pct(rk.sector_over) }}{% endif %}</div>
+  </div>
+  {% set wc = rk.worst_confidence %}
+  {% set sev = 'crit' if (rk.worst_risk_pct and rk.worst_risk_pct > rk.worst_threshold) else ('warn' if (rk.worst_risk_pct and rk.worst_risk_pct > rk.worst_near) else 'ok') %}
+  <div class="card risk {{ sev }}">
+    <div class="k">最高单笔风险</div>
+    <div class="v"><span class="{{ 'crit-num' if sev == 'crit' }}">{{ pct(rk.worst_risk_pct) }}</span>
+      <span class="sevtag {{ sev }}">{{ '严重' if sev=='crit' else ('接近' if sev=='warn' else '正常') }}</span>
+      {% if wc.is_estimate %}<span class="tag warn">估算</span>{% endif %}</div>
+    <div class="sub obj">{{ rk.worst_symbol or '—' }}</div>
+    <div class="sub">风险预算 {{ pct(rk.worst_threshold) }}（R7）{% if rk.worst_target is not none %} · 参考上限 {{ '{:,}'.format(rk.worst_target) }} 股{% endif %}
+      {% if wc.level not in ('HIGH',) %}<br>可信度 <span class="tag {{ 'warn' if wc.level != 'UNAVAILABLE' else 'crit' }}">{{ wc.level }}</span>{% endif %}
+    </div>
+  </div>
+  {% set sev = 'crit' if rk.crit_alerts else ('warn' if (rk.high_alerts or rk.warn_alerts) else 'ok') %}
+  <div class="card risk {{ sev }}">
+    <div class="k">未处理硬约束 · Top 3</div>
+    <div class="v"><span class="{{ 'crit-num' if sev == 'crit' }}">{{ rk.hard_alerts_total }}</span>
+      <span class="sevtag {{ sev }}">{{ '严重' if sev=='crit' else ('警告' if sev=='warn' else '正常') }}</span></div>
+    <div class="sub obj">{% if rk.open_alerts %}严重 {{ rk.crit_alerts }} · 高风险 {{ rk.high_alerts }} · 其他 {{ rk.warn_alerts }}{% else %}当前无未处理硬约束{% endif %}</div>
+    {% for a in rk.open_alerts %}
+    <div class="sub" style="margin-top:4px"><a href="/events/{{ a.event_id }}" style="color:var(--fg)">
+      <b>{{ a.rule }}</b>{% if a.symbol %} · {{ a.symbol }}{% endif %} · {{ a.title }}</a></div>
+    {% endfor %}
+    <div class="sub"><a href="/events" style="color:var(--accent)">查看全部告警 →</a></div>
+  </div>
+</div>
+{% endif %}
+
+{# ==================== 市场环境（市场环境引擎 v1） ==================== #}
+{% if market %}
+<h2 title="{{ market.calc_version }} · 账户风险与市场风险分开保存">市场环境<span class="h2sub muted" style="cursor:help">ⓘ</span></h2>
+
+{% if not market.reliable %}
+<div class="dstate crit" style="margin-bottom:12px">
+  <div class="ds-main"><span class="ds-badge crit">⛔ 市场数据不足，无法可靠判断市场环境</span></div>
+  <div class="ds-warn">{{ market.blocked_reason or '缺少必需的市场数据' }}<br>
+    下列指标仅供参考，<b>不代表市场风险为低</b>。</div>
+</div>
+{% endif %}
+
+<div class="riskgrid">
+  <div class="card riskmain {{ market.css }}">
+    <div class="k">市场状态</div>
+    <div class="risklevel {{ market.css }}" id="live-market-state">{{ market.icon }} {{ market.label }}</div>
+    <div class="riskscore">
+      市场风险评分 <b id="live-market-score">{{ market.score or '—' }}</b><span class="muted">/100</span>
+      <span class="tag {{ 'good' if market.reliable else 'crit' }}">{{ '可靠' if market.reliable else '不可靠' }}</span>
+    </div>
+    <div class="sub">数据截至 <span id="live-market-as-of">{{ market.data_as_of }}</span>
+      {% if market.quality_status != 'fresh' %}<span class="flag">· 非实时</span>{% endif %}</div>
+    <dl class="riskkv">
+      <div><dt>QQQ 相对 20 日均线</dt><dd data-live-market-metric="qqq.vs_ma20">{{ market.qqq_vs_ma20 }}</dd></div>
+      <div><dt>QQQ 相对 50 日均线</dt><dd data-live-market-metric="qqq.vs_ma50">{{ market.qqq_vs_ma50 }}</dd></div>
+      <div><dt>QQQ 相对 200 日均线</dt><dd data-live-market-metric="qqq.vs_ma200">{{ market.qqq_vs_ma200 }}</dd></div>
+      <div><dt>半导体相对大盘（20日）</dt><dd data-live-market-metric="sox_vs_qqq_20d">{{ market.sox_vs_qqq }}</dd></div>
+    </dl>
+    <div class="sub" style="margin-top:2px">VIX / VXN / 十年期美债见下方完整行情表</div>
+  </div>
+
+  <div class="card">
+    <div class="k">主要市场风险来源{% if not market.drivers %}（当前无触发）{% endif %}</div>
+    {% if market.drivers %}
+    <ol class="drivers">
+      {% for dv in market.drivers %}
+      <li class="sev-{{ dv.severity }} {{ 'driver-extra' if loop.index > 3 }}">
+        <div class="dv-head"><span class="ds-sev {{ dv.severity }}">{{ dv.severity }}</span>
+          <b>{{ dv.title }}</b></div>
+        <div class="dv-num">当前 <b>{{ dv.actual_display }}</b> · 阈值 {{ dv.threshold_display }}
+          {% if dv.affected_instrument %}<span class="muted">· {{ dv.affected_instrument }}</span>{% endif %}</div>
+        <div class="dv-check">建议检查：{{ dv.recommended_check }}</div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}<p class="muted" style="margin:8px 0 0">当前没有触发市场风险规则。</p>{% endif %}
+
+    {% if market.combined %}
+    <div class="combined">
+      <div class="k" style="margin-top:10px">账户 × 市场 联合视图</div>
+      <div class="cb-line">
+        账户风险 <b>{{ market.combined.account_risk_level }}</b> ·
+        市场环境 <b>{{ market.combined.market_state }}</b> ·
+        关注度系数 <b>{{ market.combined.risk_amplification_factor }}</b>
+        <span class="tag {{ 'good' if market.combined.reliable else 'crit' }}">{{ '可靠' if market.combined.reliable else '不可靠' }}</span>
+      </div>
+      <div class="sub">{{ market.combined.combined_risk_view }}</div>
+      {% for d in market.combined.combined_risk_drivers %}
+      <div class="cb-driver {{ d.kind }}">
+        <b>{{ '⬆ 放大' if d.kind == 'amplifier' else '⬇ 缓冲' }}</b>
+        {{ d.title }} <span class="muted">×{{ d.factor }}</span>
+        <div class="sub">{{ d.explanation }}</div>
+      </div>
+      {% endfor %}
+      {% if not market.combined.combined_risk_drivers %}
+      <div class="sub muted">当前没有明显的放大或缓冲因素。</div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if market.instruments %}
+<div class="panel scroll desktop-only" style="padding:4px 0;margin-top:10px">
+<table class="postbl">
+  <thead><tr><th>标的</th><th>价格</th><th>日涨跌</th><th>行情时间</th><th>数据状态</th></tr></thead>
+  <tbody>
+  {% for code, i in market.instruments.items() %}
+  <tr data-live-market-code="{{ code }}">
+    <td><span class="sym">{{ code }}</span> <span class="muted">{{ i.name }}</span></td>
+    <td class="cellnum" data-live-market-field="close">{{ i.close or '—' }}</td>
+    <td class="cellnum" data-live-market-field="change">{{ i.daily_change_percent or '—' }}</td>
+    <td class="cellnum" data-live-market-field="time">{{ i.time_label }}</td>
+    <td><span data-live-market-field="quality" class="sevtag {{ i.q.css }}">{{ i.q.label }}</span>
+      <span class="muted" data-live-market-field="source">{{ i.q.source }}</span></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="mobile-card-list" style="margin-top:10px">
+  {% for code, i in market.instruments.items() %}
+  <div class="mobile-data-card" data-live-market-code="{{ code }}"><div class="mobile-card-body"><div class="mobile-card-head"><span class="mobile-card-title">{{ code }} <span class="muted">{{ i.name }}</span></span><span class="mobile-card-value" data-live-market-field="close">{{ i.close or '—' }}</span></div><div class="mobile-card-meta"><span data-live-market-field="change">{{ i.daily_change_percent or '—' }}</span><span><span data-live-market-field="quality" class="sevtag {{ i.q.css }}">{{ i.q.label }}</span></span></div><div class="mobile-card-meta"><span data-live-market-field="time">{{ i.time_label }}</span><span data-live-market-field="source">{{ i.q.source }}</span></div></div></div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+{% if ready_opportunities %}
+{# ==================== 今日机会：只显示最多 3 个 READY 候选 ==================== #}
+<h2>今日机会<span class="h2sub">{{ ready_opportunities|length }} 个达到执行门槛 · <a href="/opportunities">查看全部机会 →</a></span></h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-bottom:14px">
+  {% for c in ready_opportunities %}
+  <article class="card" style="border-left:3px solid var(--good);min-width:0">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+      <span class="sym" style="font-size:18px">{{ c.symbol }}</span>
+      <span class="sevtag ok">READY · {{ c.score }}</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">
+      <span class="tag">{{ '趋势突破' if c.setup_type == 'BREAKOUT' else '健康回踩' }}</span>
+      <span class="tag">{{ c.confidence }}</span>
+    </div>
+    <dl class="riskkv" style="margin-top:8px">
+      <div><dt>参考现价</dt><dd>{{ money(c.current_price) }}</dd></div>
+      <div><dt>入场上限</dt><dd>{{ money(c.entry_high) }}</dd></div>
+      <div><dt>建议止损</dt><dd>{{ money(c.stop_price) }}</dd></div>
+      <div><dt>每股风险</dt><dd>{{ money(c.risk_per_share) }}</dd></div>
+    </dl>
+    {% if c.reasons_json %}<div class="sub" style="overflow-wrap:anywhere">{{ c.reasons_json[:2]|join('；') }}</div>{% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ==================== 二、当前持仓 ==================== #}
+{% set ns = namespace(risk=0, near=0) %}
+{% for q in data.positions %}
+  {% if q.breached or q.exceeds %}{% set ns.risk = ns.risk + 1 %}{% endif %}
+  {% if q.near_stop %}{% set ns.near = ns.near + 1 %}{% endif %}
+{% endfor %}
+{% if risk and risk.conc %}
+<div style="border:1px solid var(--line);border-left:3px solid var(--muted);
+  border-radius:8px;padding:10px 14px;margin:8px 0 14px;font-size:12px;line-height:1.7;
+  background:var(--panel)">
+  <b>集中度指标适用性</b>
+  <span style="color:var(--muted)">
+    适用 {{ risk.conc.applicable_rule_count }} 条 ·
+    不适用 {{ risk.conc.not_applicable_rule_count }} 条 ·
+    评分方式 {{ risk.conc.normalization_method }}
+  </span>
+  {% if risk.conc.not_applicable %}
+  <ul style="margin:6px 0 0;padding-left:20px">
+    {% for x in risk.conc.not_applicable %}
+    <li><b>{{ x.rule_code }}</b>：<span style="color:var(--muted)">{{ x.reason }}</span></li>
+    {% endfor %}
+  </ul>
+  <p style="color:var(--muted);margin:6px 0 0">
+    不适用<b>不等于通过</b> —— 这些指标在当前持仓数下没有判别力，
+    集中风险改由 HHI、等效持仓数与单仓主导度刻画。
+  </p>
+  {% endif %}
+  {% if risk.conc.excluded_count %}
+  <p style="color:var(--warn);margin:6px 0 0">
+    已排除 {{ risk.conc.excluded_count }} 条无效持仓记录：
+    {% for e in risk.conc.excluded %}{{ e.symbol }}（{{ e.note }}）{% if not loop.last %}；{% endif %}{% endfor %}
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+
+<h2>当前持仓<span class="h2sub">{{ data.positions | length }} 个标的{% if ns.risk %} · {{ ns.risk }} 个风险超限{% endif %} · 按市值降序</span></h2>
+
+{% set qs = data.quote_status %}
+<div class="panel" style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px 20px;align-items:baseline">
+  <strong class="{{ qs.css }}">行情：{{ qs.label }}</strong>
+  <span>富途行情 <b id="live-futu-count">{{ qs.futu_count }}/{{ qs.total }}</b></span>
+  <span class="{{ 'warn' if qs.ibkr_fallback else 'muted' }}">IBKR 回退 <b id="live-ibkr-count">{{ qs.ibkr_fallback }}</b></span>
+  {% if qs.missing %}<span class="flag">缺失 {{ qs.missing }}</span>{% endif %}
+  <span class="muted" id="live-delivery">页面每 {{ config.live_publish_interval if config is defined else 1 }} 秒检查</span>
+</div>
+
+{% set dc = data.day_pnl_check %}
+<div class="panel" style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px 20px;align-items:baseline">
+  <span>持仓浮盈合计
+    <strong class="livenum {{ 'up' if dc.positions_sum and dc.positions_sum >= 0 else 'down' }}"
+            style="font-size:16px;min-width:8ch" data-live-positions-sum>{{ signed(dc.positions_sum) }}</strong></span>
+  <span class="muted">净资产 <b class="livenum" style="min-width:8ch" data-live-balance="equity">{{ money(data.balances.equity) if data.balances and data.balances.equity is not none else '数据缺失' }}</b></span>
+  <span class="muted">总计现金 <b class="livenum" style="min-width:8ch" data-live-total-cash>{{ money(data.total_cash) if data.total_cash is not none else '数据缺失' }}</b></span>
+  <span class="muted">现金比例 <b class="livenum" style="min-width:4ch">{{ risk.cash_ratio }}</b></span>
+  {% if dc.status == 'MATCHED' %}<span class="ok">✅ 一致</span>
+    <details class="why-more"><summary>i</summary><div class="pop">{{ dc.note }}</div></details>
+  {% elif dc.status == 'MISMATCH' %}<span class="flag">🔴 {{ dc.note }}</span>
+  {% else %}<span class="flag">⚠️ {{ dc.note }}</span>{% endif %}
+  {% if dc.realized_today is not none %}
+    <span class="muted">当日已实现 {{ signed(dc.realized_today) }}</span>
+  {% endif %}
+</div>
+
+{% if data.positions %}
+<div class="panel posfilter" style="padding:10px 0 4px">
+  <input type="radio" name="pf" id="pf-all" checked>
+  <input type="radio" name="pf" id="pf-risk">
+  <input type="radio" name="pf" id="pf-near">
+  <div class="pfbar">
+    <label for="pf-all">全部 {{ data.positions | length }}</label>
+    <label for="pf-risk">风险超限 {{ ns.risk }}</label>
+    <label for="pf-near">接近止损 {{ ns.near }}</label>
+  </div>
+  <div class="scroll desktop-only">
+  <table class="postbl">
+    <colgroup>
+      <col class="pos-col-symbol"><col class="pos-col-market"><col class="pos-col-change">
+      <col class="pos-col-price"><col class="pos-col-cost"><col class="pos-col-upl">
+      <col class="pos-col-realized"><col class="pos-col-weq">
+      <col class="pos-col-stop"><col class="pos-col-advice">
+    </colgroup>
+    <thead><tr>
+      <th>标的 / 权重</th><th>市值 / 持仓</th><th>日涨跌</th><th>现价</th>
+      <th>均价</th><th>浮动盈亏</th><th>已实现盈亏</th>
+      <th>占总资产</th>
+      <th>止损 / 距离</th><th>建议</th>
+    </tr></thead>
+    <tbody>
+    {# 风险占比三列（占总资产/占已投资/占账户亏损）来自风险引擎，按标的关联到本表 #}
+    {% set riskmap = {} %}
+    {% for rp in (risk.positions if risk and risk.positions else []) %}
+      {% set _ = riskmap.update({rp.symbol: rp}) %}
+    {% endfor %}
+    {% for q in data.positions %}
+    {% set rp = riskmap.get(q.symbol) %}
+    {% set rowcls = 'crit' if q.breached else ('warn' if q.exceeds) %}
+    {% set keycls = 'is-key' if q.is_key %}
+    <tr class="pfrow {{ rowcls }} {{ keycls }} {{ 'is-risk' if (q.breached or q.exceeds) }} {{ 'is-near' if q.near_stop }}" data-live-symbol="{{ q.symbol }}">
+      <td>
+        <span class="sym">{{ q.symbol }}</span>
+        <span class="tag" style="margin-left:5px">{{ q.side or '-' }}</span>
+        <div class="wbar" title="占已投资仓位 {{ pct(q.weight) }}">
+          <span class="track"><i style="width:{{ (q.weight * 100) | round(1) if q.weight is not none else 0 }}%"></i></span>
+          <em>{{ pct(q.weight) }}</em>
+        </div>
+      </td>
+      <td class="cellnum"><b data-live-position="market_value">{{ money(q.market_value) }}</b>
+        <div class="sub"><span data-live-position="qty">{{ money(q.qty) }}</span> 股</div></td>
+      <td class="cellnum {{ 'up' if q.day_change is not none and q.day_change >= 0 else ('down' if q.day_change is not none) }}"
+          title="现价相对昨收 {{ money(q.prev_close) if q.prev_close is not none else '暂无昨收' }}">
+        <div class="pnl-stack">
+          <b data-live-position="day_pct" class="pnl-pct {{ 'up' if q.day_pct and q.day_pct >= 0 else ('down' if q.day_pct) }}">{{ pct(q.day_pct) }}</b>
+          <div class="sub pnl-amount" data-live-position="day_change">{{ signed(q.day_change) }}</div>
+        </div>
+      </td>
+      <td class="cellnum" data-prev-close="{{ q.prev_close or '' }}">
+        <b data-live-position="price" class="{{ 'up' if q.day_change is not none and q.day_change >= 0 else ('down' if q.day_change is not none) }}">{{ money(q.price) if q.price else '—' }}</b><span class="plabel {{ q.quality_css if q.quality_css != 'ok' }}">{{ q.price_label if q.price else '无行情' }}</span>
+        <div class="sub" data-live-position="quote_meta" title="{{ q.quality_hint }}">{{ q.quote_source_label }} · {{ q.quality_label }}</div>
+      </td>
+      <td class="cellnum"><b data-live-position="avg_cost">{{ money(q.avg_cost) }}</b>
+        <div class="sub">成本 {{ money(q.cost_basis) }}</div></td>
+      <td class="cellnum {{ 'up' if q.upl and q.upl >= 0 else ('down' if q.upl) }}">
+        <div class="pnl-stack">
+          <b data-live-position="upl_pct" class="pnl-pct {{ 'up' if q.upl_pct is not none and q.upl_pct >= 0 else ('down' if q.upl_pct is not none) }}">{{ pct(q.upl_pct) if q.upl_pct is not none else '—' }}</b>
+          <div class="sub pnl-amount" data-live-position="upl">{{ signed(q.upl) }}</div>
+        </div>
+      </td>
+      <td class="cellnum {{ 'up' if q.realized_pnl is not none and q.realized_pnl >= 0 else ('down' if q.realized_pnl is not none) }}"
+          data-live-position="realized_pnl"
+          title="{{ q.realized_pnl_source or 'IBKR 本轮暂无逐持仓已实现盈亏' }}">
+        {% if q.realized_pnl is not none %}{{ signed(q.realized_pnl) }}
+        {% else %}<span class="muted">—</span>{% endif %}
+      </td>
+      {% set weq_over = rp and rp.weight_of_equity is not none and risk.weight_equity_max is not none and (rp.weight_of_equity | float) > (risk.weight_equity_max | float) %}
+      <td class="cellnum">{% if rp %}<b {% if weq_over %}style="color:var(--crit)" title="超过单一持仓占总资产上限 {{ risk.fmt(risk.weight_equity_max) }}"{% endif %}>{{ risk.fmt(rp.weight_of_equity) }}</b>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="cellnum">
+        {% if q.stop %}{{ money(q.stop) }}{% else %}—{% endif %}
+        {% if q.distance is not none %}<div class="sub">距 {{ pct(q.distance) }}</div>{% endif %}
+      </td>
+      <td class="pos-advice">
+        {% if q.advice %}
+        <span class="advlabel adv-{{ q.advice.level }}">{{ q.advice.label }}</span>
+        <div class="sub">{{ q.advice.detail }}{% if q.advice.from_reco and q.advice.decided_by %} <span class="muted">· 依据{{ q.advice.decided_by }}</span>{% endif %}</div>
+        {% endif %}
+        {% if q.tech %}
+        <div class="sub" style="margin-top:3px">
+          <a href="/technical?symbol={{ q.symbol }}" style="color:var(--{{ q.tech.css }});text-decoration:none">技术面 · {{ q.tech.summary }}</a>
+        </div>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="mobile-card-list" style="padding:0 10px 6px">
+  {% for q in data.positions %}
+    {% set rp = riskmap.get(q.symbol) %}{% set rowcls = 'crit' if q.breached else ('warn' if q.exceeds) %}
+    <details class="mobile-data-card position-mobile-card {{ rowcls }}" data-live-symbol="{{ q.symbol }}">
+      <summary><div class="mobile-card-head"><span class="mobile-card-title">{{ q.symbol }} <span class="tag">{{ q.side or '-' }}</span></span><span class="mobile-card-value {{ 'up' if q.upl and q.upl >= 0 else ('down' if q.upl) }}" data-live-position="upl">{{ signed(q.upl) }}</span></div><div class="mobile-card-meta"><span>市值 <b data-live-position="market_value">{{ money(q.market_value) }}</b> · 仓位 {{ pct(q.weight) }}</span><span>{{ q.advice.label if q.advice else '正常' }}</span></div></summary>
+      <div class="mobile-card-body"><dl class="mobile-kv">
+        <dt>持仓数量</dt><dd><span data-live-position="qty">{{ money(q.qty) }}</span> 股</dd><dt>现价</dt><dd data-live-position="price">{{ money(q.price) if q.price else '—' }}</dd>
+        <dt>日涨跌</dt><dd><span data-live-position="day_pct">{{ pct(q.day_pct) }}</span> / <span data-live-position="day_change">{{ signed(q.day_change) }}</span></dd>
+        <dt>均价</dt><dd data-live-position="avg_cost">{{ money(q.avg_cost) }}</dd><dt>浮动盈亏</dt><dd><span data-live-position="upl_pct">{{ pct(q.upl_pct) if q.upl_pct is not none else '—' }}</span></dd>
+        <dt>已实现盈亏</dt><dd data-live-position="realized_pnl">{{ signed(q.realized_pnl) if q.realized_pnl is not none else '—' }}</dd><dt>占总资产</dt><dd>{{ risk.fmt(rp.weight_of_equity) if rp else '—' }}</dd>
+        <dt>止损/距离</dt><dd>{{ money(q.stop) if q.stop else '—' }}{% if q.distance is not none %} / {{ pct(q.distance) }}{% endif %}</dd><dt>建议</dt><dd>{{ q.advice.detail if q.advice else '无需调整' }}</dd>
+      </dl>{% if q.tech %}<a class="btn sec" style="width:100%;margin-top:10px" href="/technical?symbol={{ q.symbol }}">技术面 · {{ q.tech.summary }}</a>{% endif %}</div>
+    </details>
+  {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="panel"><p class="muted">暂无持仓数据（同步服务是否已运行？）</p></div>
+{% endif %}
+
+{# ==================== 五、持仓决策与操作计划 ==================== #}
+{% from "_plan_form.html" import plan_form %}
+{% set pp = data.position_plans %}
+<h2 id="position-plans">🧭 持仓决策与操作计划
+  <span class="h2sub">当前执行中的计划 · 清仓后只读归档到投资日记</span></h2>
+<div class="panel pp-panel">
+  {% if pp.cards %}
+  <div class="pp-grid">
+    {% for card in pp.cards %}
+    {% set card_error = plan_error if plan_error and plan_error.cycle_id == card.id else None %}
+    <details class="pp-card" id="pp-{{ card.id }}"
+      {% if card_error or card.id == open_cycle_id %}open{% endif %}>
+      <summary>
+        <span class="pp-summary">
+          <span><span class="pp-symbol">{{ card.symbol }}</span>
+            <span class="muted"> · {{ card.current_quantity_display }} 股 · 成本 {{ card.current_average_cost_display }}</span></span>
+          <span class="pp-status status-{{ card.status|lower }}">{{ card.status_label }}</span>
+        </span>
+        {# 有加/减仓计划就把每条列出来（加仓、减仓同时可见）；否则回退到「下一步」提示。 #}
+        {% if card.plan_actions %}
+        <div class="sub" style="margin-top:5px">
+          {% for line in card.plan_actions %}<span style="display:inline-block;margin-right:14px">{{ line }}</span>{% endfor %}
+        </div>
+        {% else %}
+        <div class="sub" style="margin-top:5px">下一步：{{ card.next_action }}</div>
+        {% endif %}
+      </summary>
+      <div class="pp-body">
+        {# 账户信息压成一行内联；复盘超期／已触发等仍由顶部待办队列承担。 #}
+        <div class="pp-meta">
+          <span>账户仓位 <b>{{ card.account_weight_display }}</b>{% if card.max_weight %} / 最大 {{ card.max_weight_display }}{% endif %}</span>
+          <span>股票权重 <b>{{ card.stock_weight_display }}</b></span>
+          {% if card.latest_plan and card.latest_plan.review_at %}<span>下次复盘 {{ pp_relative(card.latest_plan.review_at) }}</span>{% endif %}
+          {% if card.has_published_plan or card.draft_plan %}<span>更新 {{ pp_relative(card.updated_display) }}</span>{% endif %}
+        </div>
+        {% if card.add_estimate %}
+        <div class="pp-alert" style="color:var(--warn)">
+          加仓估算：执行后约 {{ num(card.add_estimate.post_quantity_display) }} 股、账户仓位 {{ card.add_estimate.post_account_weight_display }}。
+          {% if card.add_estimate.exceeds_max_weight %}⚠️ 将超过最大允许账户仓位。{% else %}距上限约可再买 {{ num(card.add_estimate.headroom_quantity_display) }} 股（{{ card.add_estimate.headroom_amount_display }}）。{% endif %}
+        </div>
+        {% endif %}
+        {% if card.journal_sync_status == 'FAILED' %}
+        <div class="pp-alert">投资日记同步失败：{{ card.journal_sync_error or '未知错误' }}
+          <form method="post" action="/position-plans/{{ card.id }}/retry-journal" style="display:inline">
+            <button class="pp-link" type="submit">安全重试</button>
+          </form>
+        </div>
+        {% endif %}
+        {% if not card.has_published_plan %}
+        {{ plan_form('/position-plans/' ~ card.id ~ '/quick', card.draft_plan or {}, card,
+                     error=card_error) }}
+        {% else %}
+        <div class="muted" style="margin-bottom:7px">购买理由：{{ card.formal_plan.thesis }}</div>
+        <div class="muted" style="margin-bottom:7px">失效条件：{{ card.formal_plan.invalidation_conditions }}</div>
+        <a class="pp-link" href="/position-plans/{{ card.id }}">查看详情、历史版本和成交匹配 →</a>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted" style="margin:0">当前没有待执行的持仓计划。新成交并完成可靠持仓同步后会自动建档。</p>
+  {% endif %}
+</div>
+
+{# ==================== 六、交易纪律（原行为计数，降到页尾并合并） ==================== #}
+<h2>交易纪律<span class="h2sub">复盘类指标，优先级低于当前风险</span></h2>
+<div class="panel discipline">
+  <dl class="disc">
+    <div class="disc-row {{ 'over' if c.decisions_month > 10 }}">
+      <dt>本月主动交易决策</dt>
+      <dd><b>{{ c.decisions_month }}</b> 次<span class="muted"> · R5 阈值 10</span>
+        {% if c.kinds_month %}<span class="muted"> · {% for k, v in c.kinds_month.items() %}{{ k }}×{{ v }} {% endfor %}</span>{% endif %}
+        {% if not c.classification_complete %}<span class="flag"> · 含未分类</span>{% endif %}</dd>
+    </div>
+    <div class="disc-row">
+      <dt>本月成交回报</dt>
+      <dd><b>{{ c.executions_month }}</b> 条<span class="muted"> · execution 口径，仅审计</span></dd>
+    </div>
+    <div class="disc-row {{ 'over' if c.risk_increasing_today >= 2 }}">
+      <dt>今日风险增加决策</dt>
+      <dd><b>{{ c.risk_increasing_today }}</b> 次<span class="muted"> · R4 开仓/加仓，阈值 2/标的·日</span></dd>
+    </div>
+    <div class="disc-row {{ 'over' if c.counter_adds > 0 }}">
+      <dt>本月逆势加仓</dt>
+      <dd><b>{{ c.counter_adds }}</b> 次<span class="muted"> · 浮亏时同向加仓（启发式）</span></dd>
+    </div>
+    <div class="disc-row">
+      <dt>R6 冷静期</dt>
+      <dd>
+        {% if c.cooldown_active %}
+          <b class="down">进行中</b><span class="muted"> · 剩余 {{ c.cooldown_remaining_hours }} 小时，至 {{ c.cooldown_ends }}</span>
+        {% elif c.r6_state == 'TRIGGERED_BEFORE' %}
+          <b>{{ '%.1f' % c.hours_since_big_loss }} 小时前</b><span class="muted"> · 最近一次触发已结束</span>
+        {% else %}
+          <b class="ok-txt">当前未触发</b>
+          <span class="muted"> · {% if c.minor_loss_events %}普通已实现亏损 {{ c.minor_loss_events }} 起，未达 2%{% else %}本月无已实现亏损事件{% endif %}</span>
+        {% endif %}
+      </dd>
+    </div>
+  </dl>
+</div>
+<script>
+/* 只覆盖当前态数值，不重绘整页：筛选、滚动位置和图表都保持不动。 */
+(function () {
+  const money = v => {
+    const n = Number(v); return Number.isFinite(n)
+      ? n.toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 4}) : "—";
+  };
+  const money2 = v => {
+    const n = Number(v); return Number.isFinite(n)
+      ? n.toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "—";
+  };
+  const signed = v => {
+    const n = Number(v); return Number.isFinite(n) ? (n >= 0 ? "+" : "") + money2(n) : "—";
+  };
+  const percent = v => {
+    const n = Number(v); return Number.isFinite(n) ? (n * 100).toFixed(2) + "%" : "—";
+  };
+  const age = ts => {
+    if (!ts) return "无时点";
+    const seconds = Math.max(0, Math.round((Date.now() - Date.parse(ts)) / 1000));
+    if (!Number.isFinite(seconds)) return "无时点";
+    return seconds < 2 ? "刚刚" : (seconds < 60 ? seconds + "秒前" : Math.floor(seconds / 60) + "分钟前");
+  };
+  const color = (el, value) => {
+    if (!el) return;
+    const n = Number(value);
+    el.classList.remove("up", "down");
+    if (Number.isFinite(n)) el.classList.add(n >= 0 ? "up" : "down");
+  };
+  const set = (root, key, value, formatter) => {
+    const el = root.querySelector('[data-live-position="' + key + '"]');
+    if (el) el.textContent = formatter(value);
+    return el;
+  };
+  async function refreshLive() {
+    if (document.hidden) return;
+    const badge = document.getElementById("live-delivery");
+    try {
+      const response = await fetch("/api/v1/account/live", {cache: "no-store", headers: {"Accept": "application/json"}});
+      if (!response.ok) throw new Error(String(response.status));
+      const envelope = await response.json();
+      const live = envelope.data || {};
+      const delivery = live.delivery || {};
+      if (badge) {
+        badge.textContent = delivery.stale ? "实时层延迟 " + age(live.generated_at) : "页面已实时更新 · " + age(live.generated_at);
+        badge.className = delivery.stale ? "warn" : "ok";
+      }
+      document.querySelectorAll("[data-live-balance]").forEach(el => {
+        const value = (live.balances || {})[el.dataset.liveBalance];
+        el.textContent = value == null || value === "" ? "数据缺失" : money(value);
+      });
+      document.querySelectorAll("[data-live-account-pnl]").forEach(el => {
+        const value = (live.account_pnl || {})[el.dataset.liveAccountPnl];
+        el.textContent = signed(value); color(el, value);
+      });
+      const incoming = new Map((live.positions || []).map(p => [String(p.symbol), p]));
+      const livePnl = live.account_pnl || {};
+      const livePositions = Array.from(incoming.values());
+      const positionUpls = livePositions.map(p => Number(p.upl));
+      const positionsSum = positionUpls.length && positionUpls.every(Number.isFinite)
+        ? positionUpls.reduce((a, b) => a + b, 0) : null;
+      const positionsSumEl = document.querySelector("[data-live-positions-sum]");
+      if (positionsSumEl) { positionsSumEl.textContent = signed(positionsSum); color(positionsSumEl, positionsSum); }
+      const totalCashEl = document.querySelector("[data-live-total-cash]");
+      if (totalCashEl) {
+        const totalCash = (live.balances || {}).total_cash;
+        totalCashEl.textContent = totalCash == null || totalCash === "" ? "数据缺失" : money(totalCash);
+      }
+      const realizedEl = document.querySelector("[data-live-today-realized]");
+      if (realizedEl) { realizedEl.textContent = signed(livePnl.realized_pnl); color(realizedEl, livePnl.realized_pnl); }
+      const todayUnrealized = (livePnl.daily_pnl != null && livePnl.realized_pnl != null
+        && Number.isFinite(Number(livePnl.daily_pnl)) && Number.isFinite(Number(livePnl.realized_pnl)))
+        ? Number(livePnl.daily_pnl) - Number(livePnl.realized_pnl) : null;
+      const todayUnrealizedEl = document.querySelector("[data-live-today-unrealized]");
+      if (todayUnrealizedEl) { todayUnrealizedEl.textContent = signed(todayUnrealized); color(todayUnrealizedEl, todayUnrealized); }
+      const pnlSource = document.querySelector("[data-live-pnl-source]");
+      if (pnlSource && livePnl.source) pnlSource.textContent = livePnl.source;
+      const rows = Array.from(document.querySelectorAll("[data-live-symbol]"));
+      const shown = new Set(rows.map(row => row.dataset.liveSymbol));
+      if (incoming.size !== shown.size || Array.from(incoming.keys()).some(s => !shown.has(s))) {
+        window.location.reload(); return;
+      }
+      rows.forEach(row => {
+        const p = incoming.get(row.dataset.liveSymbol); if (!p) return;
+        set(row, "market_value", p.market_value, money2);
+        set(row, "qty", p.qty, money);
+        set(row, "avg_cost", p.avg_cost, money);
+        const price = set(row, "price", p.price, money2);
+        const upl = set(row, "upl", p.upl, signed); color(upl, p.upl);
+        const qty = Number(p.qty), avgCost = Number(p.avg_cost), uplValue = Number(p.upl);
+        const costBasis = Math.abs(qty) * avgCost;
+        const uplPctValue = Number.isFinite(uplValue) && Number.isFinite(costBasis) && costBasis > 0
+          ? uplValue / costBasis : NaN;
+        const uplPct = set(row, "upl_pct", uplPctValue, percent); color(uplPct, uplPctValue);
+        const realizedPnl = set(row, "realized_pnl", p.realized_pnl, signed);
+        color(realizedPnl, p.realized_pnl);
+        const priceCell = price && price.closest("td");
+        if (priceCell && p.previous_close != null) priceCell.dataset.prevClose = p.previous_close;
+        const previous = priceCell ? Number(priceCell.dataset.prevClose) : NaN;
+        const dayChangeValue = p.daily_change != null ? Number(p.daily_change) : NaN;
+        const dayPctValue = p.daily_change_percent != null ? Number(p.daily_change_percent) : NaN;
+        color(price, dayChangeValue);
+        const dayChange = set(row, "day_change", dayChangeValue, signed); color(dayChange, dayChangeValue);
+        const dayPct = set(row, "day_pct", dayPctValue, percent); color(dayPct, dayPctValue);
+        const meta = row.querySelector('[data-live-position="quote_meta"]');
+        if (meta) {
+          const source = String(p.source || "").startsWith("FUTU") ? "富途" : "IBKR 回退";
+          const quality = p.price_quality === "REALTIME" ? "实时" : (p.price_quality || "缺失");
+          const metaText = source + " · " + quality;
+          if (meta.textContent !== metaText) meta.textContent = metaText;
+        }
+      });
+      const futuCount = livePositions.filter(p => String(p.source || "").startsWith("FUTU")).length;
+      const futuEl = document.getElementById("live-futu-count");
+      if (futuEl) futuEl.textContent = futuCount + "/" + livePositions.length;
+      const ibkrEl = document.getElementById("live-ibkr-count");
+      if (ibkrEl) ibkrEl.textContent = String(livePositions.length - futuCount);
+      const market = live.market || {};
+      const marketInstruments = market.instruments || {};
+      document.querySelectorAll("[data-live-market-code]").forEach(row => {
+        const item = marketInstruments[row.dataset.liveMarketCode]; if (!item) return;
+        const close = row.querySelector('[data-live-market-field="close"]');
+        if (close) close.textContent = row.dataset.liveMarketCode === "US10Y"
+          ? ((Math.abs(Number(item.close)) > 10 ? Number(item.close) / 10 : Number(item.close)).toFixed(3) + "%")
+          : money(item.close);
+        const change = row.querySelector('[data-live-market-field="change"]');
+        if (change) { change.textContent = percent(item.daily_change_percent); color(change, item.daily_change_percent); }
+        const time = row.querySelector('[data-live-market-field="time"]');
+        if (time) time.textContent = item.quote_as_of ? age(item.quote_as_of) : (item.data_as_of ? item.data_as_of + " 收盘" : "—");
+        const quality = row.querySelector('[data-live-market-field="quality"]');
+        if (quality) {
+          const hasQuote = Boolean(item.quote_as_of);
+          quality.textContent = item.quality_status !== "fresh" ? (item.quality_status || "缺失")
+            : (hasQuote ? (item.delayed ? "延迟" : "实时") : "收盘价");
+          quality.className = "sevtag " + (item.quality_status !== "fresh" ? "crit" : (hasQuote && item.delayed ? "warn" : "ok"));
+        }
+        const source = row.querySelector('[data-live-market-field="source"]');
+        if (source) source.textContent = item.source === "FUTU_OpenD" ? "富途"
+          : (String(item.source || "").startsWith("IBKR_reqMktData") ? "IBKR" : "IBKR 回退");
+      });
+      const marketState = document.getElementById("live-market-state");
+      if (marketState && market.state) {
+        const labels = {supportive:"✅ 环境支持", neutral:"⚪ 中性", cautious:"⚠️ 需谨慎", stressed:"🔴 市场承压", blocked:"⛔ 无法判断"};
+        marketState.textContent = labels[market.state] || market.state;
+      }
+      const marketScore = document.getElementById("live-market-score");
+      if (marketScore) marketScore.textContent = market.score == null ? "—" : market.score;
+      const marketAsOf = document.getElementById("live-market-as-of");
+      if (marketAsOf && market.as_of) marketAsOf.textContent = age(market.as_of);
+      const metricValue = path => path.split(".").reduce((v, k) => (v || {})[k], market);
+      document.querySelectorAll("[data-live-market-metric]").forEach(el => {
+        const value = metricValue(el.dataset.liveMarketMetric);
+        el.textContent = el.dataset.liveMarketMetric.startsWith("vol.") || el.dataset.liveMarketMetric.startsWith("rates.")
+          ? money(value) : percent(value);
+        color(el, value);
+      });
+      const timestamps = live.timestamps || {};
+      document.querySelectorAll("[data-live-time]").forEach(el => {
+        el.textContent = age(timestamps[el.dataset.liveTime]);
+      });
+    } catch (error) {
+      if (badge) { badge.textContent = "实时更新连接异常"; badge.className = "warn"; }
+    }
+  }
+  refreshLive();
+  window.setInterval(refreshLive, 1000);
+})();
+</script>
+{% endblock %}

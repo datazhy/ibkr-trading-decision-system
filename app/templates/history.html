@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}交易历史 · 小鱼交易台{% endblock %}
+{% block content %}
+<h2>交易历史</h2>
+<div class="panel desktop-only">
+  <form class="filters" hx-get="/history" hx-target="#history-live"
+        hx-select="#history-live" hx-push-url="true" hx-swap="outerHTML">
+    <label>标的
+      <select name="symbol">
+        <option value="">全部</option>
+        {% for s in symbols %}
+        <option value="{{ s }}" {{ 'selected' if s == f.symbol }}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>方向
+      <input type="text" name="action" value="{{ f.action or '' }}" placeholder="如 SELL" size="10">
+    </label>
+    <label>起始日期<input type="date" name="start" value="{{ f.start or '' }}"></label>
+    <label>结束日期<input type="date" name="end" value="{{ f.end or '' }}"></label>
+    <button class="btn" type="submit">筛选</button>
+    <a class="btn sec" href="/history/export.csv?{{ query_string }}">导出 CSV</a>
+  </form>
+</div>
+<div class="mobile-only">
+  <button class="btn sec mobile-filter-trigger" type="button" data-history-filter-open>☷ 筛选成交</button>
+  {% if f.symbol or f.action or f.start or f.end %}
+  <div class="mobile-filter-chips">
+    {% if f.symbol %}<span class="tag">标的 {{ f.symbol }}</span>{% endif %}
+    {% if f.action %}<span class="tag">方向 {{ f.action }}</span>{% endif %}
+    {% if f.start %}<span class="tag">从 {{ f.start }}</span>{% endif %}
+    {% if f.end %}<span class="tag">至 {{ f.end }}</span>{% endif %}
+  </div>{% endif %}
+</div>
+<dialog class="mobile-sheet" id="history-filter" aria-label="成交筛选">
+  <div class="mobile-sheet-head"><span>筛选成交</span><button class="mobile-icon-btn" type="button" data-history-filter-close>✕</button></div>
+  <form class="filters" method="get" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <label>标的<select name="symbol"><option value="">全部</option>{% for s in symbols %}<option value="{{ s }}" {{ 'selected' if s == f.symbol }}>{{ s }}</option>{% endfor %}</select></label>
+    <label>方向<input type="text" name="action" value="{{ f.action or '' }}" placeholder="如 SELL"></label>
+    <label>起始日期<input type="date" name="start" value="{{ f.start or '' }}"></label>
+    <label>结束日期<input type="date" name="end" value="{{ f.end or '' }}"></label>
+    <button class="btn" type="submit">应用筛选</button>
+    <a class="btn sec" href="/history">清除筛选</a>
+    <a class="btn sec" style="grid-column:1/-1" href="/history/export.csv?{{ query_string }}">导出 CSV</a>
+  </form>
+</dialog>
+
+<div id="history-live"
+     hx-get="/history?{{ query_string }}{% if query_string %}&{% endif %}page={{ history_page }}"
+     hx-trigger="every 2s [!document.hidden]"
+     hx-select="#history-live" hx-swap="outerHTML">
+{% if summary %}
+<div class="cards tight" style="margin-bottom:14px">
+  <div class="card">
+    <div class="k">IBKR 已实现盈亏</div>
+    <div class="v {{ 'up' if summary.realized and summary.realized >= 0 else ('down' if summary.realized) }}">
+      {% if summary.realized is not none %}{{ signed(summary.realized) }}{% else %}<span class="muted">—</span>{% endif %}
+    </div>
+    <div class="sub">{{ summary.realized_source }}
+      {% if summary.n_estimate %}<br><span class="flag">另有 {{ summary.n_estimate }} 笔无券商值，
+        估算 {{ signed(summary.estimate_realized) }}（不与上方合并）</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="k">佣金</div>
+    <div class="v">{{ money(summary.commission) }}</div>
+    <div class="sub">{{ summary.commission_note }}</div>
+  </div>
+
+  <div class="card">
+    <div class="k">对账状态</div>
+    {% set rec = summary.reconcile %}
+    <div class="v {{ 'up' if rec.status == 'MATCHED' else 'down' }}" style="font-size:20px">
+      {% if rec.status == 'MATCHED' %}✅ 已核对
+      {% elif rec.status == 'MISMATCH' %}🔴 不一致
+      {% else %}⚠️ 无法对账{% endif %}
+    </div>
+    <div class="sub">
+      账户级 {{ money(rec.broker_value) }} · 成交汇总 {{ money(rec.executions_value) }}
+      {% if rec.difference is not none %}<br>差异 {{ signed(rec.difference) }}{% endif %}
+      {% if rec.note %}<br><span class="flag">{{ rec.note }}</span>{% endif %}
+      <br><span class="muted">{{ summary.reconcile_scope }}</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="k">成交笔数（execution）</div>
+    <div class="v">{{ summary.executions }}</div>
+    <div class="sub">一次成交回报为一笔；部分成交多笔</div>
+  </div>
+
+  <div class="card">
+    <div class="k">主动交易决策（decision）</div>
+    <div class="v">{{ summary.decisions }}</div>
+    <div class="sub">同一决策的部分成交只算一次
+      {% if summary.decision_kinds %}<br>{% for k, v in summary.decision_kinds.items() %}{{ k }}×{{ v }} {% endfor %}{% endif %}
+      {% if not summary.classification_complete %}<br><span class="flag">含未分类决策，分类不完整</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="k">买入 / 卖出总额</div>
+    <div class="v sm">买 {{ money(summary.buy_amount) }}</div>
+    <div class="v sm">卖 {{ money(summary.sell_amount) }}</div>
+    <div class="sub">成交金额，不含佣金</div>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  {% include "_history_table.html" %}
+</div>
+</div>
+<script>
+(function(){
+  var d=document.getElementById('history-filter');
+  var o=document.querySelector('[data-history-filter-open]');
+  var c=document.querySelector('[data-history-filter-close]');
+  if(o&&d)o.addEventListener('click',function(){d.showModal();});
+  if(c&&d)c.addEventListener('click',function(){d.close();});
+})();
+</script>
+{% endblock %}

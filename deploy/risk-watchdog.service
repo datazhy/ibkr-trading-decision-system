@@ -1,0 +1,22 @@
+# /etc/systemd/system/risk-watchdog.service
+# IB Gateway watchdog（宿主机执行，非 Docker HEALTHCHECK —— 容器 Up 不代表进程活着）
+# 安装见 deploy/risk-watchdog.timer 头部说明。
+[Unit]
+Description=小鱼交易台 - IB Gateway watchdog (四层探活 + 受控恢复)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/risk-dashboard
+Environment=RISK_BASE=/opt/risk-dashboard
+Environment=PYTHONUNBUFFERED=1
+# 默认参数（如需调整在此覆盖）：
+# Environment=WD_GRACE=300
+# Environment=WD_FAIL_THRESHOLD=3
+# Environment=WD_COOLDOWN=900
+# Environment=WD_MAX_PER_HOUR=2
+# Environment=WD_DATA_STALE=300
+ExecStart=/usr/bin/python3 /opt/risk-dashboard/scripts/watchdog.py
+# 单次执行上限（含等待 TOTP 登录 + 补同步）
+TimeoutStartSec=600

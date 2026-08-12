@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}机会 · 小鱼交易台{% endblock %}
+{% block content %}
+<style>
+  .op-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  .op-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .op-banner{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;font-size:13px}
+  .op-banner.ok{border-color:var(--good);color:var(--good)}
+  .op-banner.err{border-color:var(--crit);color:var(--crit)}
+  .op-banner.off{border-color:var(--warn);color:var(--warn)}
+  .op-form{display:grid;grid-template-columns:140px 160px minmax(220px,1fr) auto;gap:8px;align-items:end}
+  .op-form label{display:grid;gap:4px;font-size:11px;color:var(--muted)}
+  .op-form input{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--panel);color:var(--fg)}
+  .op-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+  .op-card{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:12px;min-width:0}
+  .op-card.ready{border-left:3px solid var(--good)}
+  .op-card.watch{border-left:3px solid var(--warn)}
+  .op-card.blocked{border-left:3px solid var(--crit)}
+  .op-card .top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .op-card .symbol{font-size:18px;font-weight:700}
+  .op-score{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+  .op-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .op-chip{border:1px solid var(--line);border-radius:7px;padding:2px 6px;font-size:10px;color:var(--muted)}
+  .op-numbers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+  .op-numbers div{min-width:0}.op-numbers small{display:block;color:var(--muted);font-size:10px}.op-numbers b{font-size:13px}
+  .op-reason{font-size:11px;color:var(--muted);line-height:1.55;margin-top:8px;overflow-wrap:anywhere}
+  .op-watch{display:grid;gap:7px}
+  .op-watch-row{display:grid;grid-template-columns:100px 100px 120px minmax(180px,1fr) auto;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding:7px 0;font-size:12px}
+  .op-watch-row form{display:inline-flex;gap:5px}
+  .op-watch-row .why{min-width:0;overflow-wrap:anywhere}
+  .op-watch-edit summary{cursor:pointer;list-style:none;color:var(--muted)}
+  .op-watch-edit summary::-webkit-details-marker{display:none}
+  .op-watch-edit summary::after{content:'编辑';margin-left:6px;color:var(--accent);font-size:11px}
+  .op-watch-edit[open] summary::after{content:'收起'}
+  .op-watch-edit form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;margin-top:6px}
+  .op-watch-edit input{min-width:0;width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--panel);color:var(--fg)}
+  .proposal-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px}
+  .proposal-summary .card{padding:9px 11px}.proposal-summary .card .v{font-size:16px}
+  .op-disclaimer{font-size:11px;color:var(--muted);line-height:1.55;margin-top:12px}
+  @media(max-width:768px){
+    .op-form{grid-template-columns:1fr 1fr}.op-form label:nth-child(3){grid-column:1/-1}.op-form button{grid-column:1/-1}
+    .op-watch-row{grid-template-columns:1fr 1fr}.op-watch-row .why{grid-column:1/-1}.op-watch-row .ops{grid-column:1/-1}
+    .op-numbers{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+</style>
+
+<div class="op-head">
+  <div>
+    <h1 style="margin-bottom:4px">机会发现与组合构建</h1>
+    <div class="muted" style="font-size:12px">个人自选池 → 趋势突破/健康回踩 → 风险定仓 → 人工确认</div>
+  </div>
+  <div class="op-actions">
+    <form method="post" action="/opportunities/scan"><button class="btn" {% if not enabled %}disabled{% endif %}>立即扫描</button></form>
+    <form method="post" action="/opportunities/portfolio"><button class="btn sec" {% if not builder_enabled or not shadow.ready or not scan %}disabled{% endif %}>生成组合建议</button></form>
+  </div>
+</div>
+
+{% if message %}<div class="op-banner ok">{{ message }}</div>{% endif %}
+{% if error %}<div class="op-banner err">{{ error }}</div>{% endif %}
+{% if not enabled %}<div class="op-banner off">机会扫描尚未启用。当前仅可维护自选池；生产影子验收前不会生成交易建议。</div>{% endif %}
+{% if enabled and not builder_enabled %}<div class="op-banner off">组合构建仍处于关闭状态。有效影子观察 {{ shadow.completed_days }} / {{ shadow.required_days }} 个交易日；机会扫描可以运行，但不会生成仓位建议。</div>{% endif %}
+{% if enabled and builder_enabled and not shadow.ready %}<div class="op-banner err">组合构建开关虽已打开，但影子门禁仍在阻止执行：有效观察 {{ shadow.completed_days }} / {{ shadow.required_days }} 个交易日。</div>{% endif %}
+{% if enabled %}
+<div class="cards tight" style="margin:10px 0">
+  <div class="card"><div class="k">有效影子天数</div><div class="v">{{ shadow.completed_days }} / {{ shadow.required_days }}</div></div>
+  <div class="card"><div class="k">还需观察</div><div class="v">{{ shadow.remaining_days }}</div></div>
+  <div class="card"><div class="k">活跃候选</div><div class="v">{{ shadow.active_symbols }}</div></div>
+  <div class="card"><div class="k">组合门禁</div><div class="v sm {{ 'pos' if shadow.ready else 'neg' }}">{{ '已通过' if shadow.ready else '观察中' }}</div></div>
+</div>
+{% if shadow.active_symbols == 0 and not shadow.ready %}<div class="op-banner off">自选池为空。空池扫描不计入观察天数，请先手工加入准备跟踪的普通股。</div>{% endif %}
+{% endif %}
+
+<h2>个人自选池<span class="h2sub">{{ watchlist|selectattr('status','equalto','ACTIVE')|list|length }} / 100 只活跃候选</span></h2>
+<div class="panel">
+  <form class="op-form" method="post" action="/opportunities/watchlist">
+    <label>股票代码<input name="symbol" required maxlength="12" placeholder="例如 NVDA"></label>
+    <label>行业<input name="sector" maxlength="40" placeholder="例如 半导体"></label>
+    <label>关注理由<input name="why_watch" maxlength="300" placeholder="为什么值得持续观察"></label>
+    <button class="btn" type="submit">加入/更新</button>
+  </form>
+  {% if watchlist %}
+  <div class="op-watch" style="margin-top:12px">
+    {% for w in watchlist %}
+    <div class="op-watch-row">
+      <b>{{ w.symbol }}</b><span>{{ w.sector or '未分类' }}</span>
+      <span class="op-chip">{{ w.status }}</span>
+      <details class="why op-watch-edit">
+        <summary>{{ w.why_watch or '未填写关注理由' }}{% if w.last_sync_status %} · 日线 {{ w.last_sync_status }}{% endif %}</summary>
+        <form method="post" action="/opportunities/watchlist">
+          <input type="hidden" name="symbol" value="{{ w.symbol }}">
+          <input type="hidden" name="sector" value="{{ w.sector or '' }}">
+          <input name="why_watch" maxlength="300" value="{{ w.why_watch or '' }}" aria-label="{{ w.symbol }} 关注理由" placeholder="为什么值得持续观察">
+          <button class="btn sec" type="submit">保存</button>
+        </form>
+      </details>
+      <span class="ops">
+        <form method="post" action="/opportunities/watchlist/{{ w.symbol }}/status">
+          {% if w.status == 'ACTIVE' %}<input type="hidden" name="status" value="PAUSED"><button class="btn sec">暂停</button>
+          {% else %}<input type="hidden" name="status" value="ACTIVE"><button class="btn sec">恢复</button>{% endif %}
+        </form>
+        <form method="post" action="/opportunities/watchlist/{{ w.symbol }}/status">
+          <input type="hidden" name="status" value="ARCHIVED"><button class="btn sec">归档</button>
+        </form>
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<p class="muted">自选池为空。先加入准备跟踪的美股普通股。</p>{% endif %}
+</div>
+
+<h2>最近扫描{% if scan %}<span class="h2sub">{{ scan.run.data_as_of or '数据日期未知' }} · {{ scan.run.rules_version }}</span>{% endif %}</h2>
+{% if scan %}
+<div class="cards tight" style="margin-bottom:10px">
+  <div class="card"><div class="k">扫描标的</div><div class="v">{{ scan.run.universe_count }}</div></div>
+  <div class="card"><div class="k">READY</div><div class="v pos">{{ scan.run.ready_count }}</div></div>
+  <div class="card"><div class="k">WATCH</div><div class="v">{{ scan.run.watch_count }}</div></div>
+  <div class="card"><div class="k">BLOCKED</div><div class="v neg">{{ scan.run.blocked_count }}</div></div>
+</div>
+<div class="op-list">
+  {% for c in scan.candidates %}
+  <article class="op-card {{ 'ready' if c.status=='READY' else ('watch' if c.status=='WATCH' else 'blocked') }}">
+    <div class="top"><span class="symbol">{{ c.symbol }}</span><span class="op-score">{{ c.score }}</span></div>
+    <div class="op-meta"><span class="op-chip">{{ c.status }}</span><span class="op-chip">{{ c.setup_type }}</span><span class="op-chip">{{ c.confidence }}</span></div>
+    <div class="op-numbers">
+      <div><small>参考现价</small><b>{{ money(c.current_price) if c.current_price else '—' }}</b></div>
+      <div><small>入场上限</small><b>{{ money(c.entry_high) if c.entry_high else '—' }}</b></div>
+      <div><small>建议止损</small><b>{{ money(c.stop_price) if c.stop_price else '—' }}</b></div>
+      <div><small>每股风险</small><b>{{ money(c.risk_per_share) if c.risk_per_share else '—' }}</b></div>
+      <div><small>RS 20日</small><b>{{ pct(c.relative_strength_20d) if c.relative_strength_20d else '—' }}</b></div>
+      <div><small>RS 60日</small><b>{{ pct(c.relative_strength_60d) if c.relative_strength_60d else '—' }}</b></div>
+    </div>
+    <div class="op-reason">
+      {% if c.reasons_json %}{{ c.reasons_json|join('；') }}{% endif %}
+      {% if c.blocked_reasons %}<br><span class="neg">{{ c.blocked_reasons|join('；') }}</span>{% endif %}
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}<div class="panel muted">尚无扫描结果。启用功能并补齐候选日线后可运行第一次扫描。</div>{% endif %}
+
+<h2>最近组合建议</h2>
+{% if proposal %}
+{% set p = proposal.proposal %}
+<div class="panel">
+  <div class="proposal-summary">
+    <div class="card"><div class="k">提案状态</div><div class="v sm">{{ p.status }}</div></div>
+    <div class="card"><div class="k">市场状态</div><div class="v sm">{{ p.market_state }}</div></div>
+    <div class="card"><div class="k">净资产</div><div class="v sm">{{ money(p.equity) }}</div></div>
+    <div class="card"><div class="k">风险预算</div><div class="v sm">{{ pct(p.risk_budget_pct) }}</div></div>
+    <div class="card"><div class="k">现有开放风险</div><div class="v sm">{{ money(p.existing_risk_amount) }}</div></div>
+    <div class="card"><div class="k">建议新增风险</div><div class="v sm">{{ money(p.proposed_risk_amount) }}</div></div>
+  </div>
+  {% if p.blocked_reasons %}<div class="op-banner err">{{ p.blocked_reasons|join('；') }}</div>{% endif %}
+  <div class="op-list">
+    {% for i in proposal['items'] if i.item_type in ['ADD','BLOCKED'] %}
+    <article class="op-card {{ 'ready' if i.item_type=='ADD' else 'blocked' }}">
+      <div class="top"><span class="symbol">{{ i.symbol }}</span><span class="op-chip">{{ i.item_type }}</span></div>
+      <div class="op-numbers">
+        <div><small>建议新增</small><b>{{ i.proposed_quantity or '0' }} 股</b></div>
+        <div><small>新增后仓位</small><b>{{ pct(i.proposed_weight) if i.proposed_weight else '—' }}</b></div>
+        <div><small>计划风险</small><b>{{ money(i.risk_amount) if i.risk_amount else '—' }}</b></div>
+        <div><small>入场区间</small><b>{{ money(i.entry_low) }}–{{ money(i.entry_high) }}</b></div>
+        <div><small>止损</small><b>{{ money(i.stop_price) if i.stop_price else '—' }}</b></div>
+        <div><small>行业</small><b>{{ i.sector or '未分类' }}</b></div>
+      </div>
+      <div class="op-reason">{{ i.reason or i.blocked_reason }}</div>
+      {% if i.item_type=='ADD' %}
+        {% if i.adoption_status=='ADOPTED' %}
+          <a class="btn sec" style="display:inline-block;margin-top:8px;text-decoration:none" href="/position-plans/{{ i.adopted_cycle_id }}">查看待执行计划</a>
+        {% elif not builder_enabled or not shadow.ready %}
+          <button class="btn sec" style="margin-top:8px" disabled>影子门禁未通过</button>
+        {% else %}
+          <form method="post" action="/opportunities/items/{{ i.id }}/adopt" style="margin-top:8px"><button class="btn">采纳为待执行计划</button></form>
+        {% endif %}
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</div>
+{% else %}<div class="panel muted">尚无组合建议。只有 READY 候选会参与组合构建，机会不足时不会强行满仓。</div>{% endif %}
+
+<h2>机会结果复盘<span class="h2sub">5 / 10 / 20 / 40 个交易日</span></h2>
+<div class="panel">
+  <div class="proposal-summary">
+    <div class="card"><div class="k">已有结果样本</div><div class="v sm">{{ outcome_summary.ready_samples_with_outcomes }}</div></div>
+    <div class="card"><div class="k">自动调参门槛</div><div class="v sm">{{ outcome_summary.minimum_samples_for_tuning }}</div></div>
+    <div class="card"><div class="k">参数状态</div><div class="v sm">{{ '可评估' if outcome_summary.tuning_allowed else '只展示，不调参' }}</div></div>
+  </div>
+  {% if outcome_summary.metrics %}
+  <div class="op-list">
+    {% for m in outcome_summary.metrics %}
+    <article class="op-card">
+      <div class="top"><span class="symbol" style="font-size:15px">{{ m.setup_type }}</span><span class="op-chip">{{ m.horizon_days }} 日 · {{ m.sample_count }} 样本</span></div>
+      <div class="op-numbers">
+        <div><small>胜率</small><b>{{ pct(m.win_rate) if m.win_rate is not none else '—' }}</b></div>
+        <div><small>平均收益</small><b>{{ pct(m.average_return_pct) if m.average_return_pct is not none else '—' }}</b></div>
+        <div><small>平均超额</small><b>{{ pct(m.average_alpha_pct) if m.average_alpha_pct is not none else '—' }}</b></div>
+        <div><small>平均 MFE</small><b>{{ pct(m.average_mfe_pct) if m.average_mfe_pct is not none else '—' }}</b></div>
+        <div><small>平均 MAE</small><b>{{ pct(m.average_mae_pct) if m.average_mae_pct is not none else '—' }}</b></div>
+        <div><small>平均 R</small><b>{{ '%.2f'|format(m.average_r_multiple) if m.average_r_multiple is not none else '—' }}</b></div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="muted">尚无到期样本。系统会在每日收盘日线更新后自动补算，不会用未收盘行情填充结果。</div>{% endif %}
+</div>
+
+<div class="op-disclaimer">机会评分与仓位建议只用于个人决策支持，不保证盈利。采纳建议仅创建持仓计划草稿，系统不会向 IBKR 自动下单；实际交易仍需人工确认。</div>
+{% endblock %}

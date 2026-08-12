@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}系统状态 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set sy = status.detail.system %}
+
+<h2>市场时段<span class="h2sub">休市（周末）期间数据与预警推送都会暂停</span></h2>
+<div class="panel" style="display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center">
+  {% set closed = status.market_session == 'CLOSED' %}
+  <span class="st {{ 'warn' if closed else 'ok' }}">
+    <span class="dot"></span>
+    <span class="lbl">当前</span>
+    {% if closed %}休市{% else %}交易中 · {{ status.market_session_label }}{% endif %}
+  </span>
+  <span style="font-variant-numeric:tabular-nums">
+    {% if closed %}{{ status.market_note }}（北京时间）
+    {% else %}美股交易时段进行中，数据与预警正常更新{% endif %}
+  </span>
+</div>
+
+<h2>能力状态<span class="h2sub">整体一个「正常」会掩盖细节，四项能力分开看</span></h2>
+<div class="cards">
+  {% for cap in status.capabilities %}
+  <div class="card">
+    <div class="k">{{ cap.label }}</div>
+    {# 用 style 指定颜色而不是 .ok/.flag 类：那两个类带 font-size:11px，会把状态文字压小 #}
+    <div class="v sm" style="color:{{ 'var(--good)' if cap.state == 'OK'
+        else ('var(--warn)' if cap.state == 'PARTIAL'
+        else ('var(--crit)' if cap.state == 'DOWN' else 'var(--muted)')) }}">
+      {% if cap.state == 'OK' %}✅{% elif cap.state == 'PARTIAL' %}⚠️{% elif cap.state == 'DOWN' %}🔴{% else %}⚪{% endif %}
+      {{ cap.state_label }}
+    </div>
+    <div class="sub">{{ cap.note or '—' }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<h2>数据新鲜度<span class="h2sub">过期的数据不会继续显示成正常</span></h2>
+<div class="panel">
+  <div style="display:flex;flex-wrap:wrap;gap:8px">
+    <span class="st {{ status.gateway.css }}" title="数据健康：{{ status.gateway.health }}">
+      <span class="dot"></span><span class="lbl">Gateway</span> {{ status.gateway.label }}
+    </span>
+    {% for it in status.entries %}
+    <span class="st {{ it.css }}" {% if it.extra %}title="{{ it.extra }}"{% endif %}>
+      <span class="dot"></span><span class="lbl">{{ it.label }}</span>
+      {{ it.abs }} · {{ it.rel }}
+      {% if it.extra %}<span class="lbl">· {{ it.extra }}</span>{% endif %}
+    </span>
+    {% endfor %}
+  </div>
+</div>
+
+<h2>系统健康</h2>
+<div class="cards wide">
+  <div class="card">
+    <div class="k">Watchdog<span class="tag {{ 'good' if sy.watchdog.healthy == '1' else 'crit' }}"
+        style="margin-left:6px">{{ sy.watchdog.state }}</span></div>
+    <dl class="kv" style="margin:8px 0 0">
+      <dt>最近检查</dt><dd>{{ sy.watchdog.last_check.abs if sy.watchdog.last_check else '无记录' }}
+        {% if sy.watchdog.last_check %}<span class="muted">· {{ sy.watchdog.last_check.rel }}</span>{% endif %}</dd>
+      <dt>探活详情</dt><dd>{{ sy.watchdog.detail or '—' }}</dd>
+      {% if sy.watchdog.healthy == '0' %}
+      <dt>连续失败</dt><dd class="flag">{{ sy.watchdog.fail_count }} 次</dd>
+      {% endif %}
+      <dt>24h 重启</dt><dd class="{{ 'flag' if sy.watchdog.restarts_24h != '0' }}">{{ sy.watchdog.restarts_24h }} 次</dd>
+      <dt>最近自动恢复</dt><dd>{{ sy.watchdog.last_restart.abs if sy.watchdog.last_restart else '无' }}</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <div class="k">调度器</div>
+    <dl class="kv" style="margin:8px 0 0">
+      <dt>最近成功任务</dt><dd>{{ sy.scheduler.last_job }}
+        {% if sy.scheduler.last_success %}<span class="muted">· {{ sy.scheduler.last_success.rel }}</span>{% endif %}</dd>
+      <dt>错过执行
+        <details class="why-more"><summary>i</summary><div class="pop">
+          调度器单线程执行（ib_async 非线程安全，不能多线程）。当一个任务尚未跑完、
+          下次触发时间已到，该次触发会被跳过并计一次。<br><br>
+          最常见于 <b>gateway 掉线</b>时：IBKR 调用卡到超时占住线程，随后几个周期被跳过。<br><br>
+          <b>不丢数据、不影响正确性</b> —— 只是那个周期没刷新，下个周期照常补上。
+          这是<b>累计</b>计数、不会自动归零；真正衡量影响的是上面「数据新鲜度」。
+          只有它持续快速增长、同时数据明显滞后，才说明同步跟不上。
+        </div></details>
+      </dt>
+      <dd class="{{ 'flag' if sy.scheduler.missed_recent }}">
+        {% if sy.scheduler.missed_count == '0' %}无
+        {% else %}累计 {{ sy.scheduler.missed_count }} 次
+          {% if sy.scheduler.last_missed %}
+            <br><span class="muted">最近一次 {{ sy.scheduler.last_missed.abs }} · {{ sy.scheduler.last_missed.rel }}</span>
+          {% endif %}
+          {% if not sy.scheduler.missed_recent %}<span class="ok">· 近 1 小时无</span>{% endif %}
+        {% endif %}
+      </dd>
+      {% if sy.scheduler.last_error %}
+      <dt>最近异常</dt>
+      <dd class="{{ 'flag' if sy.scheduler.error_recent }}">
+        {{ sy.scheduler.last_error_job }} · {{ sy.scheduler.last_error.rel }}
+        {% if not sy.scheduler.error_recent %}<span class="ok">· 已恢复</span>{% endif %}
+      </dd>
+      {% endif %}
+    </dl>
+  </div>
+
+  <div class="card">
+    <div class="k">数据库</div>
+    <dl class="kv" style="margin:8px 0 0">
+      <dt>最近成功写入</dt><dd>{{ sy.database.last_write.abs if sy.database.last_write else '—' }}
+        {% if sy.database.last_write %}<span class="muted">· {{ sy.database.last_write.rel }}</span>{% endif %}</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <div class="k">PnL 订阅<span class="tag {{ 'good' if sy.pnl.quality == 'OK' else 'warn' }}"
+        style="margin-left:6px">{{ sy.pnl.quality }}</span></div>
+    <dl class="kv" style="margin:8px 0 0">
+      <dt>数据源</dt><dd>{{ sy.pnl.source }}</dd>
+      <dt>最近更新</dt><dd>{{ sy.pnl.as_of.abs if sy.pnl.as_of else '—' }}
+        {% if sy.pnl.as_of %}<span class="muted">· {{ sy.pnl.as_of.rel }}</span>{% endif %}</dd>
+      <dt>重置口径</dt><dd>{{ sy.pnl.reset_policy }}</dd>
+    </dl>
+  </div>
+</div>
+
+<h2>数据批次<span class="h2sub">同一批次 ID 表示各页读的是同一时点的数据</span></h2>
+<div class="panel">
+  <dl class="kv">
+    <dt>数据健康</dt><dd>{{ status.detail.data_health }}</dd>
+    <dt>同步批次</dt><dd style="font-family:ui-monospace,monospace">{{ status.detail.sync_run_id or '—' }}</dd>
+    <dt>行情时点</dt><dd>{{ status.detail.quote_as_of or '收盘价无可信时点' }}</dd>
+    <dt>行情质量</dt><dd>
+      {% for k, v in status.detail.quote_quality.items() %}{{ k }} × {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}
+      {% if not status.detail.quote_quality %}—{% endif %}
+    </dd>
+  </dl>
+</div>
+{% endblock %}

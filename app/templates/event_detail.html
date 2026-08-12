@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}{{ data.event.title }} · 小鱼交易台{% endblock %}
+{% block content %}
+{% set e = data.event %}
+{% set ann = data.annotations %}
+{% if ann and ann.count %}
+<div style="border:1px solid var(--warn);border-left:4px solid var(--warn);
+  border-radius:8px;padding:12px 16px;margin:0 0 16px;line-height:1.8">
+  {% if ann.notice %}<b style="color:var(--warn)">⚠️ {{ ann.notice }}</b><br>{% endif %}
+  <table style="margin-top:8px;font-size:12px">
+    <thead><tr><th>标注类型</th><th>来源</th><th>原因</th><th>标注时间</th>
+      <th>排除研究</th><th>关联 transition</th></tr></thead>
+    <tbody>
+      {% for a in ann['items'] %}
+      <tr>
+        <td>{{ a.annotation_type }}</td>
+        <td>{{ a.origin }}</td>
+        <td>{{ a.reason_text }}<br>
+          <span class="muted" style="font-size:11px">{{ a.reason_code }}</span></td>
+        <td>{{ a.created_at[:19] }}</td>
+        <td>{{ '是' if a.excluded_from_research else '否' }}</td>
+        <td><code style="font-size:11px">{{ a.transition_id or '—' }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if ann.related_notifications %}
+  <p style="margin:8px 0 0;font-size:12px">
+    <b>关联的误发通知：</b>
+    {% for n in ann.related_notifications %}
+      {{ n.classification }}（{{ n.reason_text }}）{% if not loop.last %}；{% endif %}
+    {% endfor %}
+    <br><span class="muted">该通知在技术上确实发送成功，因此
+    <b>success 字段保持不变</b> —— 分类是叠加的事实，不是对原记录的修正。</span>
+  </p>
+  {% endif %}
+  <p class="muted" style="margin:8px 0 0;font-size:12px">
+    下方时间线为<b>完整原始记录</b>，未做任何删除或改写。
+  </p>
+</div>
+{% endif %}
+t %}
+<style>
+  .back{font-size:12px;color:var(--muted);text-decoration:none}
+  .ehead{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 4px}
+  .ehead h2{margin:0}
+  .stbadge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;
+    padding:2px 8px;border-radius:8px;border:1px solid var(--line);white-space:nowrap}
+  .stbadge.st-open{color:var(--crit);border-color:var(--crit)}
+  .stbadge.st-ack{color:var(--warn);border-color:var(--warn)}
+  .stbadge.st-resolved{color:var(--good);border-color:var(--good)}
+  .stbadge.st-suppressed{color:var(--muted)}
+  .why{font-size:13px;line-height:1.7;margin:10px 0;max-width:76ch}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+  .box{border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--panel)}
+  .box h3{margin:0 0 8px;font-size:13px}
+  .tl{list-style:none;padding:0;margin:0;font-size:12px}
+  .tl li{padding:6px 0 6px 14px;border-left:2px solid var(--line);position:relative}
+  .tl li:before{content:"";position:absolute;left:-5px;top:11px;width:8px;height:8px;
+    border-radius:50%;background:var(--muted)}
+  .tl li.up:before{background:var(--crit)} .tl li.down:before{background:var(--warn)}
+  .tl li.ok:before{background:var(--good)}
+  .tl .t{color:var(--muted);font-size:11px}
+  .nt{font-size:12px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .nt .bad{color:var(--crit)} .nt .good{color:var(--good)}
+  .acts{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
+  .acts button{font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--line);
+    background:var(--panel);color:var(--fg);cursor:pointer}
+  .acts button:hover{border-color:var(--accent)}
+  .note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.6}
+</style>
+
+<a class="back" href="/events">← 返回风险事件</a>
+<div class="ehead">
+  <h2>{{ e.sev_icon }} {{ e.title }}</h2>
+  <span class="sevtag {{ e.sev_css }}">{{ e.sev_label }}</span>
+  <span class="stbadge {{ e.status_css }}">{{ e.status_icon }} {{ e.status_label }}</span>
+  <span class="srcchip" style="font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 6px">{{ e.source_label }}</span>
+</div>
+
+{% if e.status == 'acknowledged' %}
+<p class="note">✔ 已于 {{ e.acknowledged_at[:16] if e.acknowledged_at }} 确认知晓
+（操作来源：{{ e.acknowledged_by or '—' }}）。<b>风险条件仍然成立</b>，确认不等于恢复。</p>
+{% elif e.status == 'suppressed' %}
+<p class="note">🔕 通知已抑制至 {{ e.suppressed_until[:16] if e.suppressed_until }}
+{{ '（原因：' + e.suppressed_reason + '）' if e.suppressed_reason }}。
+事件仍在记录并继续累计，到期后自动恢复正常告警。</p>
+{% endif %}
+
+<p class="why">{{ e.explanation }}</p>
+{% if e.recommended_check %}
+<p class="why"><b>建议检查：</b>{{ e.recommended_check }}</p>
+{% endif %}
+
+<div class="acts">
+  {% if e.status in ('open', 'suppressed') %}
+  <button onclick="act('acknowledge')">标记已知晓</button>{% endif %}
+  {% if e.status != 'resolved' %}
+  <button onclick="act('suppress?hours=24')">抑制通知 24 小时</button>{% endif %}
+</div>
+
+<div class="grid2">
+  <div class="box">
+    <h3>事实与阈值</h3>
+    <dl class="kv">
+      <dt>当前值</dt><dd>{{ e.actual_display }}</dd>
+      <dt>阈值</dt><dd>{{ e.threshold_display }}</dd>
+      <dt>影响对象</dt><dd>{{ e.affected }}</dd>
+      <dt>规则码</dt><dd>{{ e.rule_code }}</dd>
+      <dt>规则版本</dt><dd style="word-break:break-all">{{ e.rule_set_version or '—' }}</dd>
+      <dt>数据截至</dt><dd>{{ e.data_as_of or '—' }}</dd>
+      <dt>数据可靠</dt><dd>{{ '是' if e.reliable else '否（结论仅供参考）' }}</dd>
+      <dt>首次发生</dt><dd>{{ e.first_abs }}</dd>
+      <dt>最近触发</dt><dd>{{ e.last_abs }}</dd>
+      {% if e.resolved_abs %}<dt>恢复时间</dt><dd>{{ e.resolved_abs }}</dd>{% endif %}
+      <dt>持续时长</dt><dd>{{ data.duration }}</dd>
+      <dt>累计触发</dt><dd>{{ e.occurrence_count }} 次</dd>
+      <dt>累计通知</dt><dd>{{ e.notification_count }} 次</dd>
+      <dt>本轮序号</dt><dd>第 {{ e.episode_seq }} 轮</dd>
+      {% if e.snapshot_id %}<dt>快照</dt><dd>{{ e.snapshot_id[:12] }}</dd>{% endif %}
+      {% if e.assessment_id %}<dt>关联评估</dt><dd>{{ e.assessment_id[:12] }}</dd>{% endif %}
+    </dl>
+    {% if data.rule %}
+    <p class="note">触发时的规则定义：{{ data.rule.get('description') or data.rule.get('rule_code') }}
+      · 阈值 {{ data.rule.get('threshold_value') }}{{ data.rule.get('threshold_unit') or '' }}
+      · 严重度 {{ data.rule.get('severity') }}</p>
+    {% endif %}
+  </div>
+
+  <div class="box">
+    <h3>状态变化历史</h3>
+    {% if not data.transitions %}
+    <p class="note">暂无状态变化记录。</p>
+    {% else %}
+    <ul class="tl">
+      {% for t in data.transitions %}
+      <li class="{{ 'up' if t.transition == 'escalated' else ('ok' if t.transition == 'resolved' else ('down' if t.transition == 'deescalated' else '')) }}">
+        <div>{{ t.reason }}</div>
+        <div class="t">{{ t.at_abs }}
+          {% if t.previous_severity and t.previous_severity != t.new_severity %}
+          · {{ t.sev_from }} → {{ t.sev_to }}{% endif %}
+          {% if t.previous_status and t.previous_status != t.new_status %}
+          · {{ t.status_from }} → {{ t.status_to }}{% endif %}
+          {% if t.actor %} · 操作者 {{ t.actor }}{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+
+  <div class="box">
+    <h3>通知历史</h3>
+    {% if not data.notifications %}
+    <p class="note">该事件尚未产生通知。warning 级默认只进时间线，不主动推送。</p>
+    {% else %}
+    {% for n in data.notifications %}
+    <div class="nt">
+      <span class="{{ 'good' if n.ok else 'bad' }}">{{ '✓ 已发送' if n.ok else '✗ 发送失败' }}</span>
+      · {{ n.type_label }} · {{ n.at_abs }}
+      {% if n.retry_count %} · 重试 {{ n.retry_count }} 次{% endif %}
+      {% if not n.ok and n.error_message %}
+      <div class="note">失败原因：{{ n.error_message }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    <p class="note">发送失败的记录同样保留 —— 失败绝不会被记成「已通知」，
+      否则冷静期会把下一次真实告警吞掉。</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function act(path) {
+  fetch('/api/v1/risk/events/{{ e.event_id }}/' + path, {method: 'POST'})
+    .then(r => r.json())
+    .then(d => { if (d.success) location.reload();
+                 else alert('操作失败：' + (d.error && d.error.message)); })
+    .catch(e => alert('请求失败：' + e));
+}
+</script>
+{% endblock %}

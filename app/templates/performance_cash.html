@@ -1,0 +1,428 @@
+{% extends "base.html" %}
+{% block title %}收益与现金流 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set d = data %}
+{% set s = d.summary %}
+<style>
+  .fbox{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    margin:10px 0;background:var(--panel);font-size:12px;line-height:1.7}
+  .fbox.warn{border-left:3px solid var(--warn)}
+  .fbox.ok{border-left:3px solid var(--good)}
+  .fbox h4{margin:0 0 6px;font-size:13px}
+  .steps{margin:6px 0 0;padding-left:20px;line-height:1.9}
+  .steps code{background:var(--panel2);padding:1px 5px;border-radius:4px}
+  .pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .pcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+    background:var(--panel)}
+  .pcard .k{color:var(--muted);font-size:11px}
+  .pcard .v{font-size:18px;font-weight:600;margin-top:3px;
+    font-variant-numeric:tabular-nums}
+  .pcard .sub{color:var(--muted);font-size:11px;margin-top:3px}
+  .pcard.flow{border-left:3px solid var(--muted)}
+  .pcard.gain{border-left:3px solid var(--accent)}
+  .rates{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  .rate{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    background:var(--panel)}
+  .rate .big{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+  .rate .big.na{font-size:14px;color:var(--muted);font-weight:400}
+  .rate .meta{color:var(--muted);font-size:11px;margin-top:6px;line-height:1.6}
+  .ftbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;
+    font-variant-numeric:tabular-nums}
+  .ftbl th{text-align:left;font-size:11px;color:var(--muted);font-weight:500;
+    padding:6px 7px;border-bottom:1px solid var(--line)}
+  .ftbl td{padding:6px 7px;border-bottom:1px solid var(--line)}
+  /* 外部资金与交易现金流必须一眼分得开 */
+  .ftbl tr.flow-external td{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+  .ftbl tr.flow-external td:first-child{border-left:2px solid var(--accent)}
+  .ftbl tr.flow-trade td:first-child{border-left:2px solid var(--line)}
+  .tag{font-size:10px;padding:1px 6px;border-radius:6px;border:1px solid var(--line);
+    color:var(--muted)}
+  .tag.ext{color:var(--accent);border-color:var(--accent)}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+  .filters select{font-size:12px;padding:4px 8px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+  .rng{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}
+  .rng a{font-size:12px;padding:3px 10px;border-radius:7px;border:1px solid var(--line);
+    color:var(--muted);text-decoration:none}
+  .rng a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .kv{font-size:12px}
+  .pager{display:flex;gap:6px;align-items:center;margin-top:10px;font-size:12px}
+  .pager a{padding:3px 10px;border:1px solid var(--line);border-radius:7px;
+    color:var(--muted);text-decoration:none}
+  @media(max-width:768px){
+    .pgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .rates{grid-template-columns:1fr}
+    .filters select{width:100%}
+    .pcard{padding:10px}.pcard .v{font-size:16px}
+  }
+</style>
+
+<h2>数据状态<span class="h2sub">Flex Query 券商流水</span></h2>
+{% if not d.flex.configured %}
+<div class="fbox warn">
+  <h4>⚠ Flex Query 未配置（not_configured）</h4>
+  当前没有券商权威流水，收益与事件复盘只能使用<b>启发式推断</b>
+  （靠净值跳变猜测资金进出）。这不影响账户同步、行情同步与风险告警。
+  <p style="margin:8px 0 4px"><b>需要在 IBKR 后台完成的配置：</b></p>
+  <ol class="steps">
+    {% for step in d.setup_steps %}<li>{{ step }}</li>{% endfor %}
+  </ol>
+</div>
+{% else %}
+<div class="fbox {{ 'ok' if d.flex.status == 'success' else 'warn' }}">
+  <h4>Flex Query：{{ d.flex.status_label }}</h4>
+  <div class="kv">
+    Query ID {{ d.flex.query_id_masked }} ·
+    最近成功 {{ d.flex.last_success_at or '—' }} ·
+    报表区间 {{ d.flex.last_report_from or '—' }} → {{ d.flex.last_report_to or '—' }} ·
+    流水总数 {{ d.flex.records_total }} ·
+    数据质量 {{ d.flex.data_quality }}
+  </div>
+  {% if d.flex.last_run and d.flex.last_run.error_message %}
+  <div style="color:var(--warn);margin-top:5px">最近错误：{{ d.flex.last_run.error_message }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="rng">
+  {% for k, label in d.range_options %}
+  <a href="?range={{ k }}" class="{{ 'on' if d.filters.range == k }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{% if s %}
+<h2>收益概览<span class="h2sub">{{ d.period.start }} → {{ d.period.end }} · 来源 {{ s.source_label }}</span></h2>
+<div class="pgrid">
+  <div class="pcard">
+    <div class="k">账户净值变化</div><div class="v">{{ s.raw_change_display }}</div>
+    <div class="sub">{{ s.opening_display }} → {{ s.closing_display }}</div>
+  </div>
+  <div class="pcard flow">
+    <div class="k">外部入金</div><div class="v">{{ s.deposits_display }}</div>
+    <div class="sub">不是盈利</div>
+  </div>
+  <div class="pcard flow">
+    <div class="k">外部出金</div><div class="v">{{ s.withdrawals_display }}</div>
+    <div class="sub">不是亏损</div>
+  </div>
+  <div class="pcard gain">
+    <div class="k">现金流调整后收益</div><div class="v">{{ s.adjusted_display }}</div>
+    <div class="sub">扣除资金进出后的真实盈亏</div>
+  </div>
+  <div class="pcard"><div class="k">已实现盈亏</div><div class="v">{{ s.realized_display }}</div></div>
+  <div class="pcard"><div class="k">未实现盈亏</div><div class="v">{{ s.unrealized_display }}</div></div>
+  <div class="pcard"><div class="k">分红</div><div class="v">{{ s.dividends_display }}</div></div>
+  <div class="pcard"><div class="k">利息</div><div class="v">{{ s.interest_display }}</div></div>
+  <div class="pcard"><div class="k">佣金</div><div class="v">{{ s.commissions_display }}</div></div>
+  <div class="pcard"><div class="k">其它费用</div><div class="v">{{ s.fees_display }}</div></div>
+  <div class="pcard"><div class="k">税费</div><div class="v">{{ s.taxes_display }}</div></div>
+  <div class="pcard"><div class="k">未解释差异</div><div class="v">{{ s.unexplained_display }}</div>
+    <div class="sub">凑不平就如实显示</div></div>
+</div>
+{% if s.quality_note %}
+<p style="color:var(--warn);font-size:11px;margin-top:8px">⚠ {{ clean_decimals(s.quality_note) }}</p>
+{% endif %}
+
+<h2>收益率<span class="h2sub">数据质量 {{ s.quality_label }}</span></h2>
+<div class="rates">
+  <div class="rate">
+    <div class="k" style="color:var(--muted);font-size:11px">Modified Dietz</div>
+    <div class="big {{ '' if s.md_available else 'na' }}">
+      {{ s.md_display if s.md_available else '当前数据不足以可靠计算' }}
+    </div>
+    <div class="meta">
+      {% if s.md_available %}
+        {{ s.md_formula }}<br>现金流权重假设：{{ s.weighting }}
+      {% else %}{{ s.md_reason or '缺少必要数据' }}{% endif %}
+    </div>
+  </div>
+  <div class="rate">
+    <div class="k" style="color:var(--muted);font-size:11px">时间加权收益率 TWR</div>
+    <div class="big {{ '' if s.twr_available else 'na' }}">
+      {{ s.twr_display if s.twr_available else '当前数据不足以可靠计算' }}
+    </div>
+    <div class="meta">
+      {% if s.twr_available %}{{ s.twr_formula }}
+      {% else %}{{ s.twr_reason or '缺少必要数据' }}{% endif %}
+    </div>
+  </div>
+</div>
+{% if s.verified_no_flows %}
+<p style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">
+  ✓ 券商流水已覆盖本区间{% if s.coverage and s.coverage.uncovered_days %}的
+  {{ s.coverage.report_from }} 至 {{ s.coverage.coverage_end }} 部分（最近
+  {{ s.coverage.uncovered_days }} 天因 Flex 为 T+1 数据源尚未覆盖）{% endif %}，
+  且<b>确认期间没有任何外部资金进出</b>，因此上面两个收益率就是真实投资收益，
+  无需再做资金流调整。
+</p>
+{% elif s.cash_flow_source == 'none' %}
+<p style="color:var(--warn);font-size:12px;margin-top:8px;line-height:1.7">
+  ⚠ <b>这两个数字是在「本期间没有任何资金进出」的假设下算出的。</b>
+  当前没有券商流水，系统无法验证这个假设是否成立 ——
+  如果期间实际发生过入金或出金，真实收益率会与上面的数字不同。
+  配置 Flex Query 后即可消除这个不确定性。
+</p>
+{% elif s.cash_flow_source == 'heuristic' %}
+<p style="color:var(--warn);font-size:12px;margin-top:8px">
+  ⚠ 外部资金进出来自<b>启发式推断</b>（靠净值跳变猜测），不是券商权威流水，
+  结果为估算值。
+</p>
+{% endif %}
+<p style="color:var(--muted);font-size:11px;margin-top:8px">
+  显示「当前数据不足以可靠计算」时表示<b>无法计算</b>，不是收益为零。
+</p>
+{% endif %}
+
+<h2>收益归因<span class="h2sub">每一项独立来源 · 未解释差额如实保留</span></h2>
+{% if not d.waterfall %}
+<p style="color:var(--muted);font-size:13px">尚无足够数据生成归因。</p>
+{% else %}
+<table class="ftbl desktop-only" style="max-width:640px">
+  <thead><tr><th>项目</th><th style="text-align:right">金额</th><th>说明</th></tr></thead>
+  <tbody>
+  <tr style="font-weight:600">
+    <td>现金流调整后收益</td>
+    <td style="text-align:right">{{ s.adjusted_display }}</td>
+    <td style="color:var(--muted)">= 净值变化 − 外部资金进出</td>
+  </tr>
+  {% for w in d.waterfall %}
+  <tr>
+    <td style="padding-left:18px">{{ w.label }}</td>
+    <td style="text-align:right{% if w.negative %};color:var(--crit){% elif w.positive %};color:var(--good){% endif %}">
+      {% if w.available %}{{ w.display }}{% else %}<span style="color:var(--muted);font-style:italic">不可用</span>{% endif %}
+    </td>
+    <td style="color:var(--muted);font-size:11px">
+      {%- if w.key == 'unexplained_difference' %}凑不平就如实显示，不强制归零
+      {%- elif w.key == 'commissions' %}fifoPnlRealized 不含佣金，此处独立计入，无重复扣除
+      {%- elif w.key == 'dividends' %}只计一次，不进入已实现盈亏
+      {%- elif w.key == 'fx_effect' %}尚未单独拆分，混在市场盈亏中
+      {%- elif w.key == 'unrealized_pnl_change' %}{{ money(s.unrealized_pnl_start) if s.unrealized_pnl_start is not none else '—' }} → {{ money(s.unrealized_pnl_end) if s.unrealized_pnl_end is not none else '—' }}
+      {%- endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="mobile-card-list">
+  <div class="mobile-data-card"><div class="mobile-card-body"><dl class="mobile-kv">
+    <dt>现金流调整后收益</dt><dd><b>{{ s.adjusted_display }}</b></dd>
+    {% for w in d.waterfall %}<dt>{{ w.label }}</dt><dd>{% if w.available %}{{ w.display }}{% else %}不可用{% endif %}</dd>{% endfor %}
+  </dl></div></div>
+</div>
+{% if s.data_limitations %}
+<div class="fbox warn" style="margin-top:10px">
+  <h4>数据限制</h4>
+  <ul class="steps">{% for x in s.data_limitations %}<li>{{ clean_decimals(x) }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+<p style="color:var(--muted);font-size:11px;margin-top:6px">
+  口径：{{ s.calculation_method and s.calculation_method.attribution_identity }}<br>
+  版本 {{ s.calculation_version }}
+</p>
+{% endif %}
+
+<h2>分币种现金对账<span class="h2sub">以 Statement of Funds 余额锚点为准</span></h2>
+{% set r = d.reconciliation_by_currency %}
+{% if not r or not r.currencies %}
+<p style="color:var(--muted);font-size:13px">尚无余额锚点，无法对账。</p>
+{% else %}
+<div class="fbox {{ 'ok' if r.status in ('reconciled','within_tolerance') else 'warn' }}">
+  <h4>{{ r.report_from }} → {{ r.report_to }} · {{ r.status_label }}
+    <span class="tag">{{ r.currency_count }} 个币种</span></h4>
+  <div class="kv">
+    基础币种 {{ r.base_currency }} ·
+    折算后总差异 {{ num(r.total_difference_base) if r.total_difference_base is not none else '不可用' }} ·
+    容差 {{ r.tolerance }} · 汇率记录 {{ d.rate_count }} 条
+  </div>
+  <p style="color:var(--muted);margin-top:5px">{{ clean_decimals(r.note) }}</p>
+  {% if r.issues %}<ul class="steps" style="color:var(--warn)">
+    {% for i in r.issues %}<li>{{ clean_decimals(i) }}</li>{% endfor %}</ul>{% endif %}
+</div>
+
+<table class="ftbl desktop-only">
+  <thead><tr>
+    <th>币种</th><th>期初</th><th>入金</th><th>出金</th><th>交易现金流</th>
+    <th>分红</th><th>利息</th><th>佣金</th><th>费用</th><th>税费</th>
+    <th>预期期末</th><th>实际期末</th><th>差异</th><th>状态</th>
+  </tr></thead>
+  <tbody>
+  {% for c in r.currencies %}
+  <tr>
+    <td><b>{{ c.currency }}</b></td>
+    <td>{{ c.opening_display }}</td>
+    <td>{{ c.deposits_display }}</td>
+    <td>{{ c.withdrawals_display }}</td>
+    <td>{{ c.trade_display }}</td>
+    <td>{{ c.dividends_display }}</td>
+    <td>{{ c.interest_display }}</td>
+    <td>{{ c.commissions_display }}</td>
+    <td>{{ c.fees_display }}</td>
+    <td>{{ c.taxes_display }}</td>
+    <td>{{ c.expected_display }}</td>
+    <td>{{ c.closing_display }}</td>
+    <td>{{ c.diff_display }}</td>
+    <td><span class="tag">{{ c.status_label }}</span></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="mobile-card-list">
+  {% for c in r.currencies %}
+  <details class="mobile-data-card">
+    <summary><div class="mobile-card-head"><span class="mobile-card-title">{{ c.currency }}</span><span class="tag">{{ c.status_label }}</span></div><div class="mobile-card-meta"><span>实际期末 {{ c.closing_display }}</span><span>差异 {{ c.diff_display }}</span></div></summary>
+    <div class="mobile-card-body"><dl class="mobile-kv">
+      <dt>期初</dt><dd>{{ c.opening_display }}</dd><dt>入金</dt><dd>{{ c.deposits_display }}</dd><dt>出金</dt><dd>{{ c.withdrawals_display }}</dd>
+      <dt>交易现金流</dt><dd>{{ c.trade_display }}</dd><dt>分红</dt><dd>{{ c.dividends_display }}</dd><dt>利息</dt><dd>{{ c.interest_display }}</dd>
+      <dt>佣金</dt><dd>{{ c.commissions_display }}</dd><dt>费用</dt><dd>{{ c.fees_display }}</dd><dt>税费</dt><dd>{{ c.taxes_display }}</dd>
+      <dt>预期期末</dt><dd>{{ c.expected_display }}</dd><dt>实际期末</dt><dd>{{ c.closing_display }}</dd><dt>差异</dt><dd>{{ c.diff_display }}</dd>
+    </dl></div>
+  </details>{% endfor %}
+</div>
+<p style="color:var(--muted);font-size:11px;margin-top:6px">
+  <b>不同币种的金额从不直接相加</b> —— 每个币种独立对账后，才用报表当时可得的
+  汇率折算成基础币种做汇总。
+</p>
+{% for c in r.currencies %}{% if c.issues %}
+<div style="font-size:11px;color:var(--warn);margin-top:4px">
+  {{ c.currency }}：{% for i in c.issues %}{{ clean_decimals(i) }}{% if not loop.last %}；{% endif %}{% endfor %}
+</div>
+{% endif %}{% endfor %}
+{% endif %}
+
+{% if d.balance_anchors %}
+<h3 style="font-size:13px;margin-top:14px">余额锚点</h3>
+<table class="ftbl desktop-only" style="max-width:560px">
+  <thead><tr><th>类型</th><th>币种</th><th>日期</th><th>余额</th><th>质量</th></tr></thead>
+  <tbody>
+  {% for b in d.balance_anchors %}
+  <tr><td>{{ b.type_label }}</td><td>{{ b.currency }}</td><td>{{ b.balance_date }}</td>
+      <td>{{ b.balance_display }}</td>
+      <td>{{ '存疑' if b.quality_status != 'ok' else '' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="mobile-card-list">
+  {% for b in d.balance_anchors %}
+  <div class="mobile-data-card"><div class="mobile-card-body"><div class="mobile-card-head"><span class="mobile-card-title">{{ b.currency }} · {{ b.type_label }}</span><span class="mobile-card-value">{{ b.balance_display }}</span></div><div class="mobile-card-meta"><span>{{ b.balance_date }}</span><span>{{ '存疑' if b.quality_status != 'ok' else '正常' }}</span></div></div></div>
+  {% endfor %}
+</div>
+<p style="color:var(--muted);font-size:11px;margin-top:4px">
+  余额锚点<b>不是经济流水</b>，不进入现金流列表，也不计入任何收入或支出。
+</p>
+{% endif %}
+
+{% if d.anchor_history %}
+<details class="fbox" style="margin-top:10px">
+  <summary style="cursor:pointer;font-weight:600">历史余额锚点 · 共 {{ d.anchor_total }} 条</summary>
+  <table class="ftbl desktop-only" style="margin-top:8px">
+    <thead><tr><th>类型</th><th>币种</th><th>日期</th><th>余额</th><th>质量</th></tr></thead>
+    <tbody>{% for b in d.anchor_history %}<tr><td>{{ b.type_label }}</td><td>{{ b.currency }}</td><td>{{ b.balance_date }}</td><td>{{ b.balance_display }}</td><td>{{ '存疑' if b.quality_status != 'ok' else '' }}</td></tr>{% endfor %}</tbody>
+  </table>
+  <div class="mobile-card-list" style="margin-top:8px">
+    {% for b in d.anchor_history %}<div class="mobile-data-card"><div class="mobile-card-body"><div class="mobile-card-head"><span class="mobile-card-title">{{ b.currency }} · {{ b.type_label }}</span><span class="mobile-card-value">{{ b.balance_display }}</span></div><div class="mobile-card-meta"><span>{{ b.balance_date }}</span><span>{{ '存疑' if b.quality_status != 'ok' else '正常' }}</span></div></div></div>{% endfor %}
+  </div>
+  {% if d.anchor_pages > 1 %}<div class="pager">
+    {% if d.anchor_page > 1 %}<a href="?range={{ d.filters.range }}{% if d.filters.category %}&category={{ d.filters.category }}{% endif %}&page={{ d.page }}&anchor_page={{ d.anchor_page - 1 }}">上一页</a>{% endif %}
+    <span>第 {{ d.anchor_page }} / {{ d.anchor_pages }} 页</span>
+    {% if d.anchor_page < d.anchor_pages %}<a href="?range={{ d.filters.range }}{% if d.filters.category %}&category={{ d.filters.category }}{% endif %}&page={{ d.page }}&anchor_page={{ d.anchor_page + 1 }}">下一页</a>{% endif %}
+  </div>{% endif %}
+</details>
+{% endif %}
+
+{% if r and r.cross %}
+<div class="fbox" style="margin-top:10px">
+  <h4>账户快照交叉验证</h4>
+  <div class="kv">
+    Flex 结算现金 {{ money(r.cross.flex_closing_cash) if r.cross.flex_closing_cash is not none else '不可用' }} ·
+    快照 TotalCashValue {{ money(r.cross.snapshot_total_cash) if r.cross.snapshot_total_cash is not none else '不可用' }} ·
+    差异 {{ money(r.cross.comparison_difference) if r.cross.comparison_difference is not none else '不可用' }} ·
+    时间差 {{ num(r.cross.timestamp_gap_hours) if r.cross.timestamp_gap_hours is not none else '—' }} 小时
+  </div>
+  <p style="color:var(--muted);margin-top:5px">{{ clean_decimals(r.cross.explanation) }}</p>
+</div>
+{% endif %}
+
+<h2>现金流时间线<span class="h2sub">共 {{ d.total }} 笔</span></h2>
+<form class="filters" method="get">
+  <input type="hidden" name="range" value="{{ d.filters.range }}">
+  <select name="category" onchange="this.form.submit()">
+    {% for v, label in d.category_options %}
+    <option value="{{ v }}" {{ 'selected' if d.filters.category == v or (not d.filters.category and not v) }}>{{ label }}</option>
+    {% endfor %}
+  </select>
+</form>
+
+{% if not d.flows %}
+<p style="color:var(--muted);font-size:13px">
+  该区间没有现金流记录{% if not d.flex.configured %}（Flex Query 尚未配置）{% endif %}。
+</p>
+{% else %}
+<table class="ftbl desktop-only">
+  <thead><tr>
+    <th>日期</th><th>类型</th><th>子类</th><th>金额</th><th>币种</th>
+    <th>标的</th><th>描述</th><th>来源</th><th>质量</th>
+  </tr></thead>
+  <tbody>
+  {% for f in d.flows %}
+  <tr class="{{ f.row_css }}">
+    <td>{{ f.et_date }}</td>
+    <td><span class="tag {{ 'ext' if f.is_external }}">{{ f.cat_label }}</span></td>
+    <td>{{ f.sub_label }}</td>
+    <td>{{ f.amount_display }}</td>
+    <td>{{ f.currency }}</td>
+    <td>{{ f.symbol or '—' }}</td>
+    <td style="max-width:26ch;color:var(--muted)">{{ f.description or '—' }}</td>
+    <td style="color:var(--muted);font-size:11px">{{ f.source }}</td>
+    <td>{{ f.quality_label }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="mobile-card-list">
+  {% for f in d.flows %}
+  <details class="mobile-data-card">
+    <summary><div class="mobile-card-head"><span class="mobile-card-title">{{ f.cat_label }} · {{ f.sub_label }}</span><span class="mobile-card-value">{{ f.amount_display }}</span></div><div class="mobile-card-meta"><span>{{ f.et_date }}{% if f.symbol %} · {{ f.symbol }}{% endif %}</span><span>{{ f.quality_label or '正常' }}</span></div></summary>
+    <div class="mobile-card-body"><dl class="mobile-kv"><dt>币种</dt><dd>{{ f.currency }}</dd><dt>标的</dt><dd>{{ f.symbol or '—' }}</dd><dt>来源</dt><dd>{{ f.source }}</dd><dt>质量</dt><dd>{{ f.quality_label or '正常' }}</dd><dt>描述</dt><dd>{{ f.description or '—' }}</dd></dl></div>
+  </details>{% endfor %}
+</div>
+<p style="color:var(--muted);font-size:11px;margin-top:6px">
+  带蓝色左边条的是<b>外部资金进出</b>，会从收益中扣除；
+  其余（含买入卖出）是投资活动本身，<b>不是</b>出入金。
+</p>
+<div class="pager">
+  {% if d.page > 1 %}<a href="?range={{ d.filters.range }}{% if d.filters.category %}&category={{ d.filters.category }}{% endif %}&page={{ d.page - 1 }}&anchor_page={{ d.anchor_page }}">上一页</a>{% endif %}
+  <span>第 {{ d.page }} / {{ d.pages }} 页</span>
+  {% if d.page < d.pages %}<a href="?range={{ d.filters.range }}{% if d.filters.category %}&category={{ d.filters.category }}{% endif %}&page={{ d.page + 1 }}&anchor_page={{ d.anchor_page }}">下一页</a>{% endif %}
+</div>
+{% endif %}
+
+<h2>现金对账</h2>
+{% if not d.reconciliation %}
+<p style="color:var(--muted);font-size:13px">尚无对账记录。Flex 同步成功后自动生成。</p>
+{% else %}
+{% set r = d.reconciliation %}
+<div class="fbox {{ 'ok' if r.quality_status in ('reconciled','within_tolerance') else 'warn' }}">
+  <h4>{{ r.period_start }} → {{ r.period_end }} · {{ r.status_label }}</h4>
+  <div class="kv">
+    期初现金 {{ money(r.opening_cash) if r.opening_cash is not none else '—' }} ·
+    外部资金 {{ money(r.external_cash_flow) if r.external_cash_flow is not none else '—' }} ·
+    交易现金流 {{ money(r.trade_cash_flow) if r.trade_cash_flow is not none else '—' }} ·
+    收入 {{ money(r.income) if r.income is not none else '—' }} ·
+    利息 {{ money(r.interest) if r.interest is not none else '—' }} ·
+    费用 {{ money(r.expense) if r.expense is not none else '—' }} ·
+    税费 {{ money(r.tax) if r.tax is not none else '—' }}<br>
+    <b>预期期末 {{ money(r.expected_closing_cash) if r.expected_closing_cash is not none else '—' }}</b> ·
+    实际期末 {{ money(r.closing_cash) if r.closing_cash is not none else '—' }} ·
+    差异 {{ money(r.reconciliation_difference) if r.reconciliation_difference is not none else '—' }}（容差 {{ money(r.tolerance) if r.tolerance is not none else '—' }}）
+  </div>
+  {% if r.issues_list %}
+  <ul class="steps" style="margin-top:6px;color:var(--warn)">
+    {% for i in r.issues_list %}<li>{{ clean_decimals(i) }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p style="color:var(--muted);margin-top:6px">
+    对账只做检验，<b>绝不修改原始流水</b>。差异常见于结算日差异与未结算资金。
+  </p>
+</div>
+{% endif %}
+{% endblock %}

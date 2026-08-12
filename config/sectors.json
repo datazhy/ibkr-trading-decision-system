@@ -1,0 +1,8 @@
+{
+  "_comment": "板块映射表：板块名 -> 该板块下的标的列表。R2 用于计算同板块集中度。按需增改。",
+  "sectors": {
+    "内存半导体": ["MU", "DRAM", "KMEM", "MRVL"],
+    "AI算力": ["NVDA", "AMD", "AVGO", "SMCI"],
+    "云软件": ["MSFT", "CRM", "NOW", "SNOW"]
+  }
+}

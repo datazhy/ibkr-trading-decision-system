@@ -1,0 +1,154 @@
+# Personal Trading Decision System — Docker Compose (IBKR read-only)
+#
+# Services:
+#   ib-gateway  IB Gateway with read-only API                         [profile: live]
+#   sync        Account sync, rules, and scheduled jobs               [profile: live]
+#   hyperliquid Optional public-data shadow collector                 [profile: live]
+#   web         FastAPI dashboard
+#   backup      SQLite online backup sidecar
+#   caddy       HTTPS reverse proxy
+#
+# Usage:
+#   Dashboard only: docker compose up -d web caddy backup
+#   Full stack:     docker compose --profile live up -d
+
+services:
+  ib-gateway:
+    # Headless IB Gateway with automatic TOTP entry. See https://heshiming.github.io/ibga/
+    image: heshiming/ibga
+    container_name: risk-ib-gateway
+    profiles: ["live"]
+    environment:
+      IB_USERNAME: "${TWS_USERID}"
+      IB_PASSWORD: "${TWS_PASSWORD}"
+      TOTP_KEY: "${TOTP_KEY}"                     # Authenticator secret used to generate the login code
+      IB_LOGINTYPE: "Live Trading"                # Live Trading | Paper Trading
+      IB_LOGINTAB: "IB API"
+      IB_REGION: "America"
+      IB_TIMEZONE: "America/New York"
+      IB_READONLY: "yes"                          # Enable the Gateway Read-Only API
+    volumes:
+      - ibga_program:/home/ibg                    # Cache the Gateway installation
+      - ibga_settings:/home/ibg_settings
+    # Port 4000 is exposed only inside the Compose network; VNC is not published.
+    expose:
+      - "4000"
+    restart: unless-stopped
+
+  sync:
+    build: .
+    image: risk-dashboard:latest
+    container_name: risk-sync
+    profiles: ["live"]
+    env_file: .env
+    environment:
+      # Requester-pays credentials are mounted read-only. Disable EC2 metadata
+      # probing so an unreachable metadata service cannot block chain jobs.
+      AWS_SHARED_CREDENTIALS_FILE: /app/secrets/aws/credentials
+      AWS_CONFIG_FILE: /app/secrets/aws/config
+      AWS_EC2_METADATA_DISABLED: "true"
+    depends_on:
+      - ib-gateway
+    # Optional Futu OpenD runs on the host and is never published externally.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets
+      - ./config:/app/config:ro
+      # Optional local X Monitor source; ingestion is read-only.
+      - ${X_MONITOR_DATA_PATH:-./data/x-monitor}:/app/x_monitor:ro
+    restart: unless-stopped
+    command: ["python", "-m", "app.service"]
+
+  hyperliquid:
+    build: .
+    image: risk-dashboard:latest
+    container_name: risk-hyperliquid
+    profiles: ["live"]
+    env_file: .env
+    environment:
+      AWS_SHARED_CREDENTIALS_FILE: /app/secrets/aws/credentials
+      AWS_CONFIG_FILE: /app/secrets/aws/config
+      AWS_EC2_METADATA_DISABLED: "true"
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets:ro
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    command: ["python", "-m", "app.hyperliquid_worker"]
+    healthcheck:
+      # Collector health requires a successful database write. Network failure
+      # keeps the process observable but marks the container unhealthy.
+      test: ["CMD-SHELL", "python -c 'import os,sqlite3,sys; p=os.getenv(\"HL_DB_PATH\",\"/app/data/hyperliquid.db\"); c=sqlite3.connect(p); r=c.execute(\"SELECT status FROM hl_collection_runs ORDER BY rowid DESC LIMIT 1\").fetchone(); sys.exit(0 if r and r[0]==\"SUCCESS\" else 1)' "]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  web:
+    build: .
+    image: risk-dashboard:latest
+    container_name: risk-web
+    env_file: .env
+    # The web process can read host Futu quotes; IBKR remains the fallback.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/app/data
+      - ./secrets:/app/secrets
+      - ./config:/app/config:ro
+      - ${X_MONITOR_DATA_PATH:-./data/x-monitor}:/app/x_monitor:ro
+    expose:
+      - "8000"
+    restart: unless-stopped
+    command: ["uvicorn", "--factory", "app.webapp:get_app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  backup:
+    image: risk-dashboard:latest
+    container_name: risk-backup
+    environment:
+      # Keep retention conservative by default because databases can grow quickly.
+      BACKUP_KEEP: "${BACKUP_KEEP:-2}"
+      BACKUP_SOURCES: "dashboard:/app/data/dashboard.db,hyperliquid:/app/data/hyperliquid.db"
+    volumes:
+      - ./data:/app/data
+      - ./backups:/app/backups
+    restart: unless-stopped
+    command: ["python", "scripts/backup.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'from pathlib import Path; import sys; sys.exit(0 if any(Path(\"/app/backups\").glob(\"*.db.gz\")) else 1)' "]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  caddy:
+    build: ./deploy/caddy
+    image: risk-caddy:latest
+    container_name: risk-caddy
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      # Standard HTTPS entry point.
+      - "443:443"
+    # Load runtime variables from the private .env file.
+    env_file: .env
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+  ibga_program:
+  ibga_settings:

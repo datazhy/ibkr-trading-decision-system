@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused improvement that preserves the safety model.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What decision, risk, data-quality, or operational problem should be solved?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest useful solution.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and data-source impact
+      description: Explain broker side effects, privacy risks, source authority, and fallback behavior.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Read-only boundary
+      options:
+        - label: This request does not add automated order, cancellation, exercise, or transfer capability.
+          required: true

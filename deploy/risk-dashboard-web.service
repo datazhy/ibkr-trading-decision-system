@@ -1,0 +1,31 @@
+# /etc/systemd/system/risk-dashboard-web.service
+# 看板 Web 服务（Phase 3）。只监听 127.0.0.1，由 Caddy 反代 + BasicAuth 暴露。
+# 安装：
+#   sudo cp deploy/risk-dashboard-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now risk-dashboard-web
+#   journalctl -u risk-dashboard-web -f
+[Unit]
+Description=小鱼交易台 - Web 服务 (只读)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=riskdash
+Group=riskdash
+WorkingDirectory=/opt/risk-dashboard
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/risk-dashboard/.venv/bin/uvicorn --factory app.webapp:get_app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=10
+
+# 加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/risk-dashboard/data /opt/risk-dashboard/secrets
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,61 @@
+<div id="history-results" class="scroll">
+  <p class="muted" style="margin:0 0 10px">
+    共 {{ history_total if history_total is defined else rows|length }} 笔成交
+    · IBKR 成交事件推送 · 页面每 2 秒更新
+  </p>
+  {% if rows %}
+  <table class="desktop-only">
+    <thead><tr>
+      <th>时间</th><th>标的</th><th>方向</th><th>数量</th><th>成交价</th>
+      <th>金额</th><th>佣金</th><th>已实现盈亏</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.time }}</td>
+        <td>{{ r.symbol or '-' }}</td>
+        <td class="muted">{{ r.action or '-' }}</td>
+        <td>{{ money(r.qty) }}</td>
+        <td>{{ money(r.price) }}</td>
+        <td>{{ money(r.amount) }}</td>
+        <td>
+          {% if r.pending_commission %}
+            <span class="muted" title="佣金由 CommissionReport 异步回填，通常几秒内到达">待入账</span>
+          {% else %}{{ money(r.fees) }}{% endif %}
+        </td>
+        <td class="{% if r.realized is not none %}{{ 'up' if r.realized >= 0 else 'down' }}{% endif %}"
+            title="{{ r.realized_source or '该笔为开仓/加仓，无已实现盈亏' }}">
+          {% if r.realized is not none %}{{ signed(r.realized) }}
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="mobile-card-list">
+    {% for r in rows %}
+    <details class="mobile-data-card">
+      <summary>
+        <div class="mobile-card-head"><span class="mobile-card-title">{{ r.symbol or '-' }} · {{ r.action or '-' }}</span><span class="mobile-card-value {{ 'up' if r.realized is not none and r.realized >= 0 else ('down' if r.realized is not none) }}">{% if r.realized is not none %}{{ signed(r.realized) }}{% else %}—{% endif %}</span></div>
+        <div class="mobile-card-meta"><span>{{ r.time }}</span><span>{{ money(r.amount) }}</span></div>
+      </summary>
+      <div class="mobile-card-body"><dl class="mobile-kv">
+        <dt>数量</dt><dd>{{ money(r.qty) }}</dd><dt>成交价</dt><dd>{{ money(r.price) }}</dd>
+        <dt>成交金额</dt><dd>{{ money(r.amount) }}</dd><dt>佣金</dt><dd>{% if r.pending_commission %}待入账{% else %}{{ money(r.fees) }}{% endif %}</dd>
+        <dt>已实现盈亏</dt><dd>{% if r.realized is not none %}{{ signed(r.realized) }}{% else %}—{% endif %}</dd>
+        <dt>来源</dt><dd>{{ r.realized_source or 'IBKR Execution' }}</dd>
+      </dl></div>
+    </details>
+    {% endfor %}
+  </div>
+  {% if history_pages is defined and history_pages > 1 %}
+  <div class="pager" style="margin-top:12px">
+    {% set sep = '&' if query_string else '' %}
+    {% if history_page > 1 %}<a href="/history?{{ query_string }}{{ sep }}page={{ history_page - 1 }}">上一页</a>{% endif %}
+    <span>第 {{ history_page }} / {{ history_pages }} 页</span>
+    {% if history_page < history_pages %}<a href="/history?{{ query_string }}{{ sep }}page={{ history_page + 1 }}">下一页</a>{% endif %}
+  </div>{% endif %}
+  {% else %}
+  <p class="muted">无符合条件的成交记录</p>
+  {% endif %}
+</div>

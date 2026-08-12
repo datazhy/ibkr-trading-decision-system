@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}历史重放 · 小鱼交易台{% endblock %}
+{% block content %}
+{% set d = data %}
+<style>
+  .warnbanner{border:2px solid var(--warn);border-radius:10px;padding:12px 16px;
+    margin:10px 0 16px;font-size:13px;line-height:1.7;font-weight:600;
+    background:color-mix(in srgb,var(--warn) 10%,var(--panel))}
+  .cov{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+  .cbox{border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+    background:var(--panel)}
+  .cbox .k{color:var(--muted);font-size:11px}
+  .cbox .v{font-size:17px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+  .cbox .sub{color:var(--muted);font-size:11px;margin-top:3px}
+  .rtbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;
+    font-variant-numeric:tabular-nums}
+  .rtbl th{text-align:left;font-size:11px;color:var(--muted);font-weight:500;
+    padding:6px 7px;border-bottom:1px solid var(--line)}
+  .rtbl td{padding:6px 7px;border-bottom:1px solid var(--line)}
+  .rtbl tr:hover td{background:var(--panel2)}
+  .tag{font-size:10px;padding:1px 6px;border-radius:6px;border:1px solid var(--line);
+    color:var(--muted)}
+  .tag.sim{color:var(--warn);border-color:var(--warn)}
+  .tag.pit{color:var(--accent);border-color:var(--accent)}
+  .fbox{border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    margin:10px 0;background:var(--panel);font-size:12px;line-height:1.7}
+</style>
+
+<h2>历史重放<span class="h2sub">在历史快照上重新执行账户风险规则</span></h2>
+
+<div class="warnbanner">⚠ {{ d.disclaimer }}</div>
+
+<h2>覆盖情况</h2>
+{% set c = d.coverage %}
+<div class="cov">
+  <div class="cbox"><div class="k">账户快照范围</div>
+    <div class="v" style="font-size:13px">{{ c.snapshot_range.start[:10] if c.snapshot_range and c.snapshot_range.start else '—' }}
+      → {{ c.snapshot_range.end[:10] if c.snapshot_range and c.snapshot_range.end else '—' }}</div>
+    <div class="sub">共 {{ c.distinct_days or 0 }} 个自然日</div></div>
+  <div class="cbox"><div class="k">快照总数</div><div class="v">{{ c.balances_total or 0 }}</div></div>
+  <div class="cbox"><div class="k">原生 snapshot_id</div>
+    <div class="v">{{ c.native_snapshot_id_ratio or '—' }}</div>
+    <div class="sub">{{ c.native_range.start[:10] if c.native_range and c.native_range.start else '—' }} 起</div></div>
+  <div class="cbox"><div class="k">时间戳可重建</div>
+    <div class="v">{{ c.reconstructable_ratio or '—' }}</div>
+    <div class="sub">账户与持仓时间完全一致</div></div>
+  <div class="cbox"><div class="k">无法关联持仓</div>
+    <div class="v">{{ c.unpairable_count or 0 }}</div>
+    <div class="sub">跳过，不拼接不同时间的数据</div></div>
+  <div class="cbox"><div class="k">市场数据</div>
+    <div class="v" style="font-size:13px">{{ c.market_coverage.start or '—' }} → {{ c.market_coverage.end or '—' }}</div>
+    <div class="sub">{{ c.market_coverage.days or 0 }} 个交易日</div></div>
+  <div class="cbox"><div class="k">Flex 权威现金流</div>
+    <div class="v" style="font-size:13px">{{ c.flex_coverage.report_from or '—' }} → {{ c.flex_coverage.report_to or '—' }}</div></div>
+  <div class="cbox"><div class="k">未实现盈亏</div>
+    <div class="v">{{ c.unrealized_pnl_coverage.days or 0 }} 天</div>
+    <div class="sub">{{ c.unrealized_pnl_coverage.start or '—' }} → {{ c.unrealized_pnl_coverage.end or '—' }}</div></div>
+  <div class="cbox"><div class="k">可重放规则</div>
+    <div class="v">{{ c.replayable_rule_count or 0 }} / {{ c.total_rule_count or 0 }}</div>
+    <div class="sub">R1–R7 不在第一版</div></div>
+</div>
+{% if c.note %}<p style="color:var(--muted);font-size:11px;margin-top:6px">{{ c.note }}</p>{% endif %}
+
+<h2>重放任务</h2>
+{% if not d.runs %}
+<p style="color:var(--muted);font-size:13px">尚未运行过历史重放。</p>
+{% else %}
+<table class="rtbl">
+  <thead><tr>
+    <th>日期范围</th><th>采样</th><th>规则版本模式</th><th>状态</th>
+    <th>采样快照</th><th>可用</th><th>跳过</th><th>评估</th><th>事件</th><th>耗时</th>
+  </tr></thead>
+  <tbody>
+  {% for r in d.runs %}
+  <tr>
+    <td>{{ r.date_start }} → {{ r.date_end }}</td>
+    <td>{{ r.sample_label }}</td>
+    <td><span class="tag {{ 'pit' if r.rule_set_mode == 'point_in_time' else 'sim' }}">{{ r.mode_label }}</span></td>
+    <td>{{ r.status_label }}</td>
+    <td>{{ r.source_snapshot_count }}</td>
+    <td>{{ r.eligible_snapshot_count }}</td>
+    <td>{{ r.skipped_snapshot_count }}</td>
+    <td>{{ r.assessment_count }}</td>
+    <td>{{ r.event_count }}</td>
+    <td>{{ r.duration_ms }} ms</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if d.selected %}
+{% set s = d.selected %}
+<h2>重放事件<span class="h2sub">{{ s.mode_label }} · {{ s.date_start }} → {{ s.date_end }}</span></h2>
+<div class="warnbanner" style="font-size:12px">
+  ⚠ 下表是<b>{{ '按当时规则版本重建的' if s.rule_set_mode == 'point_in_time' else '用今天规则模拟的' }}</b>结果，
+  <b>不是当时实际发送过的告警</b>。真实告警请看「风险事件」页面。
+</div>
+{% if s.skip_reasons %}
+<div class="fbox">
+  <b>跳过原因：</b>
+  {% for k, v in s.skip_reasons.items() %}{{ k }} × {{ v }}{% if not loop.last %}；{% endif %}{% endfor %}
+</div>
+{% endif %}
+{% if s.error_message %}
+<div class="fbox" style="border-left:3px solid var(--warn)">{{ s.error_message }}</div>
+{% endif %}
+
+{% if d.rule_summary %}
+<h3 style="font-size:13px">规则触发汇总</h3>
+<table class="rtbl" style="max-width:520px">
+  <thead><tr><th>规则</th><th>评估次数</th><th>触发次数</th><th>触发率</th></tr></thead>
+  <tbody>
+  {% for r in d.rule_summary %}
+  {% if r.triggers %}
+  <tr><td>{{ r.rule_code }}</td><td>{{ r.evaluations }}</td><td>{{ r.triggers }}</td>
+      <td>{{ '%.0f%%' % (100.0 * r.triggers / r.evaluations) if r.evaluations else '—' }}</td></tr>
+  {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if not d.events %}
+<p style="color:var(--muted);font-size:13px">该任务未产生任何 episode。</p>
+{% else %}
+<table class="rtbl">
+  <thead><tr>
+    <th>规则</th><th>影响对象</th><th>首次触发</th><th>峰值严重度</th>
+    <th>持续</th><th>次数</th><th>恢复</th><th>可靠性</th><th>与真实事件</th>
+  </tr></thead>
+  <tbody>
+  {% for e in d.events %}
+  <tr>
+    <td>{{ e.rule_code }}</td>
+    <td>{{ e.affected_symbol or '—' }}</td>
+    <td>{{ e.first_abs }}</td>
+    <td>{{ e.peak_severity or '—' }}</td>
+    <td>{{ e.duration_minutes if e.duration_minutes is not none else '—' }} 分钟</td>
+    <td>{{ e.occurrence_count }}</td>
+    <td>{{ e.resolved_abs or '未恢复' }}</td>
+    <td>{{ e.reliable_label }}</td>
+    <td style="color:var(--muted)">{{ e.matched_label }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}
+{% endblock %}

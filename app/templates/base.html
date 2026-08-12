@@ -1,0 +1,816 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}小鱼交易台{% endblock %}</title>
+  <script>
+    /* 必须在样式生效前同步执行：晚一步就会先闪一下默认色再跳到用户选的色。
+       localStorage 读不到（隐私模式/禁用）时静默回到跟随系统，不报错。 */
+    (function () {
+      try {
+        var t = localStorage.getItem("theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) { /* 跟随系统 */ }
+    })();
+  </script>
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <style>
+    /* ---------------- 主题 ----------------
+       两套调色板各自**只定义一次**，下面三条规则只负责「用哪一套」：
+         :root                      默认暗色
+         :root:not([data-theme])    没手动选过时跟随系统
+         :root[data-theme=...]      手动选过就以手动为准，压过系统
+       data-theme 由 <head> 里的内联脚本在首次绘制前写好，避免闪一下白/黑。 */
+    :root{
+      /* 暗色调色板 */
+      --d-bg:#0f1216; --d-panel:#171b21; --d-panel2:#1e242c; --d-line:#2a323c;
+      --d-fg:#e6e9ee; --d-muted:#93a0b0;
+      --d-profit:#e5534b; --d-loss:#3fb27f;
+      --d-good:#3fb27f; --d-warn:#e0a458; --d-crit:#e5534b; --d-accent:#5aa9e6;
+      /* 亮色调色板 */
+      --l-bg:#f4f6f8; --l-panel:#ffffff; --l-panel2:#eef1f5; --l-line:#dde2e8;
+      --l-fg:#16202b; --l-muted:#5b6672;
+      --l-profit:#c0392b; --l-loss:#1a8f5c;
+      --l-good:#1a8f5c; --l-warn:#a56200; --l-crit:#c0392b; --l-accent:#2b6cb0;
+
+      /* 生效的一套（默认暗）。涨跌色与状态色刻意分开 —— 两者语义不同：
+         盈利的红不该让告警也变红，正常的绿也不该跟亏损的绿混为一谈。 */
+      color-scheme:dark;
+      --bg:var(--d-bg); --panel:var(--d-panel); --panel2:var(--d-panel2);
+      --line:var(--d-line); --fg:var(--d-fg); --muted:var(--d-muted);
+      --profit:var(--d-profit); --loss:var(--d-loss);
+      --good:var(--d-good); --warn:var(--d-warn); --crit:var(--d-crit);
+      --accent:var(--d-accent);
+      --shadow:0 1px 2px rgba(0,0,0,.35);
+
+      /* 页面留白与最大宽度：全局一处定义，各页面共用 */
+      --page-gutter:50px;
+      --page-max:1760px;
+    }
+    @media (prefers-color-scheme: light){
+      :root:not([data-theme]){
+        color-scheme:light;
+        --bg:var(--l-bg); --panel:var(--l-panel); --panel2:var(--l-panel2);
+        --line:var(--l-line); --fg:var(--l-fg); --muted:var(--l-muted);
+        --profit:var(--l-profit); --loss:var(--l-loss);
+        --good:var(--l-good); --warn:var(--l-warn); --crit:var(--l-crit);
+        --accent:var(--l-accent);
+        --shadow:0 1px 3px rgba(16,24,40,.08);
+      }
+    }
+    :root[data-theme="light"]{
+      color-scheme:light;
+      --bg:var(--l-bg); --panel:var(--l-panel); --panel2:var(--l-panel2);
+      --line:var(--l-line); --fg:var(--l-fg); --muted:var(--l-muted);
+      --profit:var(--l-profit); --loss:var(--l-loss);
+      --good:var(--l-good); --warn:var(--l-warn); --crit:var(--l-crit);
+      --accent:var(--l-accent);
+      --shadow:0 1px 3px rgba(16,24,40,.08);
+    }
+    :root[data-theme="dark"]{
+      color-scheme:dark;
+      --bg:var(--d-bg); --panel:var(--d-panel); --panel2:var(--d-panel2);
+      --line:var(--d-line); --fg:var(--d-fg); --muted:var(--d-muted);
+      --profit:var(--d-profit); --loss:var(--d-loss);
+      --good:var(--d-good); --warn:var(--d-warn); --crit:var(--d-crit);
+      --accent:var(--d-accent);
+      --shadow:0 1px 2px rgba(0,0,0,.35);
+    }
+    /* 亮色下卡片给一点点阴影，否则纯白面板叠纯白背景会糊成一片 */
+    :root[data-theme="light"] .card,
+    :root[data-theme="light"] .panel{box-shadow:var(--shadow)}
+    @media (prefers-color-scheme: light){
+      :root:not([data-theme]) .card,
+      :root:not([data-theme]) .panel{box-shadow:var(--shadow)}
+    }
+
+    /* 主题切换按钮 */
+    .themetog{display:inline-flex;align-items:center;gap:5px;cursor:pointer;
+      border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+      border-radius:8px;padding:5px 10px;font-size:12px;line-height:1;
+      font-family:inherit}
+    .themetog:hover{color:var(--fg);border-color:var(--accent)}
+    .themetog .ticon{font-size:13px}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--fg);
+      font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;}
+    /* 顶栏与正文用同一个 gutter，左右边缘才对得齐 */
+    header{display:flex;align-items:center;gap:14px;
+      padding:12px var(--page-gutter);
+      border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+    header .brand{font-weight:600;color:var(--fg);text-decoration:none;font-size:15px}
+    header .brand:hover{color:var(--accent)}
+    header .ro{font-size:12px;color:var(--muted);border:1px solid var(--line);
+      padding:2px 8px;border-radius:10px}
+    nav{display:flex;gap:2px;margin-left:auto;flex-wrap:wrap}
+    nav a{color:var(--muted);text-decoration:none;padding:6px 11px;border-radius:8px;font-size:13px}
+    nav a:hover{background:var(--panel2);color:var(--fg)}
+    nav a.active{background:var(--accent);color:#fff}
+    nav .health{display:inline-flex;align-items:center;gap:5px}
+    nav .health .dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted)}
+    nav .health.ok .dot{background:var(--good)}
+    nav .health.warn .dot{background:var(--warn)}
+    nav .health.crit .dot{background:var(--crit)}
+    nav a.navmore{font-weight:700;letter-spacing:1px;padding:6px 9px}
+    .livenum{font-variant-numeric:tabular-nums;display:inline-block;text-align:right}
+    .card-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}
+    .card-grid .card{padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+    @media (max-width:900px){.card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    .subnav{display:flex;gap:2px;flex-wrap:wrap;align-items:center;
+      padding:7px var(--page-gutter);border-bottom:1px solid var(--line);
+      background:var(--panel2)}
+    .subnav a{color:var(--muted);text-decoration:none;padding:5px 11px;
+      border-radius:7px;font-size:13px}
+    .subnav a:hover{background:var(--panel);color:var(--fg)}
+    .subnav a.active{color:var(--fg);font-weight:600;background:var(--panel)}
+    /* ---------------- 页面留白 ----------------
+       `--page-gutter` 是**全局**左右留白，所有页面共用一个值。
+       原先 max-width:1120px 在 1500px+ 的屏上两侧各空 200px 以上，
+       表格与卡片被挤在中间一条窄带里，宽屏的空间白白浪费。
+       现在放开到 --page-max，绝大多数笔记本/显示器上内容会一直铺到
+       距边缘 --page-gutter 处；超宽屏才开始居中，避免行长到需要转头去读。 */
+    main{width:100%;max-width:var(--page-max);margin:0 auto;
+         padding:20px var(--page-gutter) 8px}
+    @media(max-width:1060px){main{--page-gutter:24px}}
+    @media(max-width:640px){main{--page-gutter:14px}}
+    h2{font-size:15px;margin:22px 0 10px;font-weight:600;position:relative;padding-left:11px;
+      display:flex;align-items:baseline;flex-wrap:wrap}
+    h2::before{content:"";position:absolute;left:0;top:.2em;bottom:.2em;width:3px;
+      border-radius:2px;background:var(--accent)}
+    h2:first-child{margin-top:0}
+    h2 .h2sub{font-size:12px;color:var(--muted);font-weight:400;margin-left:8px}
+
+    /* 卡片：紧凑网格。原先 200px/16px padding/26px 数字，一屏放不下几张。 */
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(172px,1fr));gap:10px}
+    .cards.wide{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+    /* 密排：6 张一行不换行（交易历史汇总）。窄屏再自动回落。 */
+    .cards.tight{grid-template-columns:repeat(6,1fr);gap:8px}
+    @media(max-width:900px){.cards.tight{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:560px){.cards.tight{grid-template-columns:repeat(2,1fr)}}
+    /* 收益 4 卡：一行 4 张，等宽等高 */
+    .cards.pnl4{grid-template-columns:repeat(4,1fr)}
+    @media(max-width:820px){.cards.pnl4{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:460px){.cards.pnl4{grid-template-columns:1fr}}
+    /* 今日盈亏卡的「已实现 / 未实现」双栏 */
+    .splitline{display:flex;gap:14px;flex-wrap:wrap;align-items:baseline}
+    .splitline b{font-variant-numeric:tabular-nums;font-weight:600}
+    /* 周期表现卡内的 CSS 切换 */
+    .periodtabs{margin-top:2px}
+    .periodtabs input{position:absolute;opacity:0;pointer-events:none}
+    .periodtabs .tab{display:inline-block;padding:2px 9px;border-radius:8px;font-size:11px;
+      border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+      cursor:pointer;margin-right:4px}
+    .periodtabs .tabbar{display:flex;gap:4px;margin-bottom:2px}
+    .periodtabs .pane{display:none;margin-top:2px}
+    .periodtabs #pd-7:checked ~ .panes .pane-p7,
+    .periodtabs #pd-h:checked ~ .panes .pane-ph{display:block}
+    .periodtabs #pd-7:checked ~ .tabbar label[for=pd-7],
+    .periodtabs #pd-h:checked ~ .tabbar label[for=pd-h]{
+      background:var(--accent);color:#fff;border-color:var(--accent)}
+    /* 风险卡：统一结构 + 分级左边条 */
+    .card.risk{border-left:3px solid var(--line)}
+    .card.risk.warn{border-left-color:var(--warn)}
+    .card.risk.crit{border-left-color:var(--crit)}
+    .card.risk .v{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .card.risk .crit-num{color:var(--crit)}
+    .card.risk .obj{font-weight:600;color:var(--fg);margin-top:3px}
+    .sevtag{font-size:10px;font-weight:600;padding:1px 7px;border-radius:7px;border:1px solid}
+    .sevtag.ok{color:var(--good);border-color:var(--good)}
+    .sevtag.warn{color:var(--warn);border-color:var(--warn)}
+    .sevtag.crit{color:#fff;background:var(--crit);border-color:var(--crit)}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+      padding:12px 14px;transition:border-color .14s ease,box-shadow .14s ease,transform .14s ease;
+      box-shadow:0 1px 2px rgba(15,18,22,.04)}
+    .card:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));
+      box-shadow:0 6px 18px rgba(15,18,22,.10);transform:translateY(-1px)}
+    .cards.tight .card{padding:10px 12px}
+    /* 主数据卡：净资产，作视觉锚点（仅淡色描边，不放大字号，保持与同排等高协调） */
+    .card.hero{background:linear-gradient(135deg,
+      color-mix(in srgb,var(--accent) 10%,var(--panel)),var(--panel));
+      border-color:color-mix(in srgb,var(--accent) 30%,var(--line))}
+    .card .k{color:var(--muted);font-size:11px;line-height:1.35}
+    .card .v{font-size:20px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums;
+      line-height:1.25;letter-spacing:.2px}
+    .cards.tight .card .v{font-size:18px}
+    .card .v.sm{font-size:15px}
+    .card .sub{color:var(--muted);font-size:11px;margin-top:4px;line-height:1.45}
+    .card .v .unit{font-size:11px;color:var(--muted);font-weight:400}
+
+    .banner{background:color-mix(in srgb,var(--crit) 18%,var(--panel));
+      border:1px solid var(--crit);color:var(--fg);border-radius:10px;
+      padding:10px 14px;margin-bottom:14px;font-weight:600}
+    .banner-run{border-radius:10px;padding:9px 13px;margin-bottom:12px;
+      border:1px solid var(--line);background:var(--panel)}
+    .banner-run.ok{border-color:var(--good)}
+    .banner-run.warn{border-color:var(--warn)}
+    .banner-run.crit{border-color:var(--crit)}
+    .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      padding:12px;margin-top:8px}
+    table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px}
+    th,td{text-align:right;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+    th:first-child,td:first-child{text-align:left}
+    th{color:var(--muted);font-weight:500;font-size:11px}
+    tbody tr:hover{background:var(--panel2)}
+
+    /* 涨跌：红盈绿亏 */
+    .up{color:var(--profit)} .down{color:var(--loss)}
+    /* 状态：与涨跌解耦 */
+    .flag{color:var(--crit);font-size:11px}
+    .ok{color:var(--good);font-size:11px}
+    .tag{font-size:10px;padding:1px 6px;border-radius:7px;border:1px solid var(--line);color:var(--muted)}
+    .tag.crit{color:var(--crit);border-color:var(--crit)}
+    .tag.warn{color:var(--warn);border-color:var(--warn)}
+    .tag.good{color:var(--good);border-color:var(--good)}
+
+    .equity-chart{width:100%;height:200px;color:var(--muted)}
+    .chart-label{font-size:10px;fill:var(--muted)}
+    .chart-zero{stroke:var(--muted);stroke-width:1;opacity:.55}
+    .chart-axis{stroke:var(--line);stroke-width:1}
+    form.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+    label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+    input,select{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+      border-radius:8px;padding:6px 9px;font-size:13px}
+    .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 12px;
+      font-size:12px;cursor:pointer;text-decoration:none;display:inline-block}
+    .btn.sec{background:var(--panel2);color:var(--fg);border:1px solid var(--line)}
+    .muted{color:var(--muted)}
+    .bar{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--line);
+      margin:5px 0 3px;overflow:hidden}
+    .bar span{display:block;height:100%;background:var(--accent);border-radius:3px}
+    /* 技术细节折叠：卡片正面只放结论，口径/来源/时点收进 ⓘ */
+    .why-more{display:inline;position:relative}
+    .why-more summary{list-style:none;cursor:help;color:var(--muted);font-size:10px;
+      border:1px solid var(--line);border-radius:50%;width:13px;height:13px;
+      display:inline-flex;align-items:center;justify-content:center;vertical-align:1px}
+    .why-more summary::-webkit-details-marker{display:none}
+    .why-more summary:hover{color:var(--accent);border-color:var(--accent)}
+    .why-more .pop{position:absolute;left:0;top:18px;z-index:8;width:250px;
+      background:var(--panel);border:1px solid var(--line);border-radius:8px;
+      padding:8px 10px;font-size:11px;line-height:1.6;color:var(--muted);
+      box-shadow:0 6px 20px rgba(0,0,0,.28);text-align:left;white-space:normal}
+    .scroll{overflow-x:auto}
+    /* 数据状态区（账户快照层）—— 状态同时用文字+图标表达，不只靠颜色 */
+    .dstate{border:1px solid var(--line);border-left-width:3px;border-radius:12px;
+      background:var(--panel);padding:10px 14px;margin-bottom:16px;font-size:13px}
+    .dstate.ok{border-left-color:var(--good)}
+    .dstate.warn{border-left-color:var(--warn);
+      background:color-mix(in srgb,var(--warn) 6%,var(--panel))}
+    .dstate.crit{border-left-color:var(--crit);
+      background:color-mix(in srgb,var(--crit) 8%,var(--panel))}
+    .ds-main{display:flex;align-items:center;flex-wrap:wrap;gap:6px 20px}
+    .ds-badge{font-weight:600;white-space:nowrap}
+    .ds-badge.ok{color:var(--good)} .ds-badge.warn{color:var(--warn)}
+    .ds-badge.crit{color:var(--crit)}
+    .ds-item{display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap;
+      font-variant-numeric:tabular-nums}
+    .ds-item b{color:var(--muted);font-weight:500;font-size:11px}
+    .ds-warn{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);
+      font-size:12px;line-height:1.6}
+    .ds-more{margin-left:auto;font-size:12px}
+    .ds-more summary{cursor:pointer;color:var(--accent)}
+    .ds-issues{margin:8px 0 0;padding-left:0;list-style:none;
+      display:flex;flex-direction:column;gap:6px}
+    .ds-issues li{font-size:12px;line-height:1.6;padding-left:10px;
+      border-left:2px solid var(--line)}
+    .ds-issues li.sev-critical{border-left-color:var(--crit)}
+    .ds-issues li.sev-warning{border-left-color:var(--warn)}
+    .ds-sev{font-size:10px;padding:0 6px;border-radius:6px;border:1px solid var(--line);
+      margin-right:6px;text-transform:uppercase}
+    .ds-sev.critical{color:#fff;background:var(--crit);border-color:var(--crit)}
+    .ds-sev.warning{color:var(--warn);border-color:var(--warn)}
+    .ds-sev.info{color:var(--muted)}
+    /* 账户风险评估区 */
+    .riskgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media(max-width:860px){.riskgrid{grid-template-columns:1fr}}
+    .card.riskmain{border-left:3px solid var(--line)}
+    .card.riskmain.ok{border-left-color:var(--good)}
+    .card.riskmain.warn{border-left-color:var(--warn)}
+    .card.riskmain.crit{border-left-color:var(--crit)}
+    .risklevel{font-size:22px;font-weight:700;margin-top:4px}
+    .risklevel.ok{color:var(--good)} .risklevel.warn{color:var(--warn)}
+    .risklevel.crit{color:var(--crit)}
+    .riskscore{font-size:13px;margin-top:4px;font-variant-numeric:tabular-nums}
+    .riskscore b{font-size:18px}
+    .riskkv{margin:10px 0 0;display:grid;grid-template-columns:1fr;gap:4px}
+    .riskkv > div{display:flex;justify-content:space-between;gap:12px;font-size:12px;
+      padding:3px 0;border-bottom:1px solid var(--line)}
+    .riskkv > div:last-child{border-bottom:none}
+    .riskkv dt{color:var(--muted);margin:0}
+    .riskkv dd{margin:0;font-variant-numeric:tabular-nums;font-weight:600}
+    .drivers{margin:8px 0 0;padding-left:0;list-style:none;
+      display:flex;flex-direction:column;gap:9px;counter-reset:dv}
+    .drivers li{font-size:12px;line-height:1.6;padding-left:10px;
+      border-left:2px solid var(--line)}
+    .drivers li.sev-critical{border-left-color:var(--crit)}
+    .drivers li.sev-high{border-left-color:var(--warn)}
+    .dv-head{display:flex;align-items:center;gap:6px}
+    .dv-num{font-variant-numeric:tabular-nums;color:var(--fg)}
+    .dv-check{color:var(--muted);margin-top:2px}
+    .ds-sev.high{color:var(--warn);border-color:var(--warn)}
+    /* 联合风险视图 */
+    .combined{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
+    .cb-line{font-size:13px;margin:4px 0}
+    .cb-driver{font-size:12px;margin-top:6px;padding-left:9px;border-left:2px solid var(--line)}
+    .cb-driver.amplifier{border-left-color:var(--crit)}
+    .cb-driver.buffer{border-left-color:var(--good)}
+    /* 系统状态页 */
+    .st{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;
+      border:1px solid var(--line);background:var(--panel);white-space:nowrap;font-size:12px}
+    .st .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
+    .st.ok .dot{background:var(--good)}
+    .st.warn .dot{background:var(--warn)}
+    .st.warn{border-color:var(--warn)}
+    .st.crit .dot{background:var(--crit)}
+    .st.crit{border-color:var(--crit);color:var(--crit)}
+    .st .lbl{color:var(--muted)}
+    .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:12px;
+      align-items:baseline}
+    .kv dt{color:var(--muted);white-space:nowrap}
+    .kv dd{margin:0;font-variant-numeric:tabular-nums}
+    .ref-rule{border-left:2px solid var(--line);padding:2px 0 2px 12px;margin-bottom:12px}
+    .ref-rule h4{margin:0 0 3px;font-size:13px}
+    .ref-rule .why{color:var(--muted);font-size:12px;line-height:1.6}
+    /* 持仓：一行一只。表格化，突出破位/超限行。 */
+    .postbl{width:100%;border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;
+      font-size:13px}
+    .posfilter .postbl{min-width:1248px;table-layout:fixed}
+    .posfilter .postbl .pos-col-symbol{width:150px}.posfilter .postbl .pos-col-market{width:128px}
+    .posfilter .postbl .pos-col-price{width:132px}.posfilter .postbl .pos-col-change{width:112px}
+    .posfilter .postbl .pos-col-cost{width:128px}.posfilter .postbl .pos-col-upl{width:112px}
+    .posfilter .postbl .pos-col-realized{width:118px}.posfilter .postbl .pos-col-stop{width:112px}
+    .posfilter .postbl .pos-col-advice{width:160px}
+    .posfilter .postbl .pos-col-weq{width:96px}
+    .postbl th{color:var(--muted);font-weight:500;font-size:11px;text-align:right;
+      padding:6px 10px;white-space:nowrap;border-bottom:1px solid var(--line)}
+    .postbl th:first-child,.postbl td:first-child{text-align:left}
+    .postbl td{padding:9px 10px;white-space:nowrap;border-bottom:1px solid var(--line);
+      vertical-align:middle}
+    .posfilter .postbl td{height:62px;overflow:hidden;text-overflow:ellipsis}
+    .posfilter .postbl td.pos-advice{height:auto;overflow:visible;text-overflow:clip;white-space:normal}
+    .posfilter .postbl .pos-advice .sub{white-space:normal;overflow-wrap:anywhere;line-height:1.45}
+    .postbl tbody tr:last-child td{border-bottom:none}
+    .postbl tbody tr:hover td{background:var(--panel2)}
+    .postbl .sym{font-size:15px;font-weight:700;letter-spacing:.3px}
+    .postbl .px{font-weight:600}
+    .postbl .plabel{font-size:10px;color:var(--muted);margin-left:5px}
+    .postbl .plabel.warn{color:var(--warn)} .postbl .plabel.crit{color:var(--crit)}
+    .postbl .sub{font-size:10px;color:var(--muted);margin-top:1px}
+    .postbl .cellnum{font-weight:600}
+    .posfilter .postbl .cellnum{text-align:right}
+    /* 涨跌数据固定为双行数字块；固定列布局 + 等宽数字避免实时刷新时横向重排。 */
+    .posfilter .postbl .pnl-stack{min-height:38px;display:flex;flex-direction:column;
+      align-items:flex-end;justify-content:center;line-height:1.2}
+    .posfilter .postbl .pnl-pct,.posfilter .postbl .pnl-amount{display:block;width:10ch;text-align:right;
+      font-variant-numeric:tabular-nums;white-space:nowrap}
+    .posfilter .postbl .pnl-pct{font-size:15px}
+    /* 超限（warn）不再整行橙色填充 —— 严重程度只由「建议」列的橙色标签承载，
+       表格保持干净。仅「已跌破止损」(crit) 保留一道最左红竖条作最高级别提醒，
+       同样不整行填充。 */
+    .postbl tr.crit td:first-child{box-shadow:inset 3px 0 0 var(--crit)}
+    .posnote{font-size:11px;padding:0 10px 9px}
+    .posnote .flag{margin-right:10px}
+    .postbl td .sub{font-size:10px;color:var(--muted);margin-top:2px;font-weight:400}
+
+/* ---- 持仓表：重点仓位与权重条 ---- */
+/* 权重条不是装饰 —— 一眼看出「钱压在哪」比读一列百分数快得多 */
+/* 百分数放在条子右侧同一行 —— 之前用绝对定位压在上一行，会盖住标的名 */
+.postbl .wbar{display:flex;align-items:center;gap:6px;margin-top:6px;
+  width:100%;max-width:140px}
+.postbl .wbar .track{position:relative;flex:1;height:4px;border-radius:2px;
+  background:var(--line);overflow:hidden}
+.postbl .wbar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;
+  background:var(--muted);display:block}
+.postbl tr.is-key .wbar i{background:var(--accent,#6b8afd)}
+.postbl .wbar em{font-style:normal;font-size:10px;color:var(--muted);
+  white-space:nowrap;flex:none;min-width:34px;text-align:right}
+/* 大仓位整行加一条左边框，扫一眼就能定位 —— 强调靠视觉，不靠文字标签 */
+.postbl tr.is-key td:first-child{box-shadow:inset 3px 0 0 var(--accent,#6b8afd)}
+
+    /* 建议列的状态标签 */
+    .advlabel{font-size:11px;font-weight:600;padding:1px 7px;border-radius:6px;
+      border:1px solid;white-space:nowrap}
+    .adv-ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 50%,transparent)}
+    .adv-warn{color:var(--warn);border-color:var(--warn)}
+    .adv-crit{color:#fff;background:var(--crit);border-color:var(--crit)}
+    .adv-info{color:var(--muted);border-color:var(--line)}
+    /* 持仓快捷筛选（纯 CSS） */
+    .posfilter input{position:absolute;opacity:0;pointer-events:none}
+    .pfbar{display:flex;gap:6px;padding:0 10px 10px;flex-wrap:wrap}
+    .pfbar label{font-size:12px;padding:4px 11px;border-radius:8px;cursor:pointer;
+      border:1px solid var(--line);background:var(--panel2);color:var(--muted)}
+    .posfilter #pf-all:checked ~ .pfbar label[for=pf-all],
+    .posfilter #pf-risk:checked ~ .pfbar label[for=pf-risk],
+    .posfilter #pf-near:checked ~ .pfbar label[for=pf-near]{
+      background:var(--accent);color:#fff;border-color:var(--accent)}
+    .posfilter #pf-risk:checked ~ .scroll .pfrow:not(.is-risk){display:none}
+    .posfilter #pf-near:checked ~ .scroll .pfrow:not(.is-near){display:none}
+    /* 交易纪律模块 */
+    .discipline .disc{margin:0;display:flex;flex-direction:column}
+    /* 持仓决策与操作计划：摘要紧凑，详情与快速建档折叠承载。 */
+    .pp-panel{padding:12px 14px}
+    .pp-metrics{display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:10px}
+    .pp-metric{font-size:12px;color:var(--muted)}
+    .pp-metric b{color:var(--fg);font-size:16px;margin-right:3px}
+    /* 待办队列：优先回答“现在该处理哪只持仓”，点击直达对应卡片。 */
+    .pp-todos{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+    .pp-todo{font-size:13px;color:var(--fg);text-decoration:none}
+    .pp-todo b{margin-right:5px}
+    .pp-todo:hover{text-decoration:underline}
+    .pp-todo.is-warn{color:var(--warn)}
+    .pp-todo.is-crit{color:var(--crit)}
+    .pp-todos-clear{font-size:12px;color:var(--muted);margin-bottom:10px}
+    .pp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(285px,1fr));gap:9px}
+    .pp-card{border:1px solid var(--line);border-radius:9px;background:var(--panel2)}
+    .pp-card[open]{grid-column:1/-1;border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+    .pp-card summary{cursor:pointer;list-style:none;padding:10px 12px}
+    .pp-card summary::-webkit-details-marker{display:none}
+    .pp-summary{display:flex;justify-content:space-between;gap:8px;align-items:center}
+    .pp-symbol{font-weight:700;font-size:15px}
+    .pp-status{font-size:11px;border-radius:99px;padding:2px 7px;background:var(--panel);color:var(--muted)}
+    .pp-status.PENDING,.pp-status.status-pending{color:var(--crit);background:color-mix(in srgb,var(--crit) 10%,var(--panel))}
+    .pp-status.REVIEW_DUE,.pp-status.TRIGGERED,.pp-status.status-review_due,.pp-status.status-triggered{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--panel))}
+    .pp-body{border-top:1px solid var(--line);padding:8px 12px;font-size:12px}
+    .pp-kv{display:grid;grid-template-columns:86px 1fr;gap:4px 8px;margin:0 0 9px}
+    .pp-meta{display:flex;flex-wrap:wrap;gap:2px 16px;color:var(--muted);margin:0 0 6px}
+    .pp-meta b{color:var(--fg);font-weight:600}
+    .pp-kv dt{color:var(--muted)}.pp-kv dd{margin:0;word-break:break-word}
+    .pp-alert{color:var(--crit);margin:5px 0 9px}
+    .pp-form-title{font-weight:600;margin:3px 0 7px}
+    .pp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 7px}
+    .pp-form label{display:flex;flex-direction:column;gap:3px;color:var(--muted)}
+    .pp-form > .full{grid-column:1/-1}
+    .pp-form input,.pp-form select,.pp-form textarea{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:6px}
+    .pp-form textarea{min-height:42px;resize:vertical}
+    .pp-form .btn{justify-self:start}
+    .pp-actions{margin-top:7px}
+    .pp-amount{display:flex;gap:5px}
+    .pp-amount input{flex:1;min-width:0}
+    .pp-amount select{flex:0 0 auto}
+    /* 操作计划：只显示当前选择真正需要的字段，避免常驻一排填不满的输入框。 */
+    .pp-actions .on-act,.pp-actions .on-price,.pp-actions .on-event{display:none}
+    .pp-actions:has(select[name=action_type] option:not([value=""]):checked) .on-act{display:flex}
+    .pp-actions:has(select[name=action_type] option:not([value=""]):checked):has(select[name=trigger_type] option[value=PRICE]:checked) .on-price{display:flex}
+    .pp-actions:has(select[name=action_type] option:not([value=""]):checked):has(select[name=trigger_type] option[value=EVENT]:checked) .on-event{display:flex}
+    @supports not (selector(:has(*))){
+      .pp-actions .on-act,.pp-actions .on-price,.pp-actions .on-event{display:flex}}
+    .pp-link{color:var(--accent);text-decoration:none}
+    .pp-error{color:var(--crit);margin:0 0 9px}
+    .pp-error .btn{margin-top:6px}
+    @media(max-width:640px){.pp-form{grid-template-columns:1fr}.pp-form > .full{grid-column:auto}}
+    .disc-row{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;
+      padding:9px 2px;border-bottom:1px solid var(--line)}
+    .disc-row:last-child{border-bottom:none}
+    .disc-row dt{color:var(--muted);font-size:13px;margin:0}
+    .disc-row dd{margin:0;font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+    .disc-row dd b{font-size:15px;font-weight:700}
+    .disc-row.over dd b{color:var(--crit)}
+    .disc-row .ok-txt{color:var(--good)}
+    /* 投资日记 */
+    .jr-compose{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+      padding:12px 14px;margin-bottom:18px;box-shadow:0 1px 2px rgba(15,18,22,.04)}
+    .jr-compose textarea,.jr-editform textarea{width:100%;resize:vertical;min-height:76px;
+      background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:9px;
+      padding:10px 12px;font:14px/1.6 inherit;font-family:inherit}
+    .jr-compose textarea:focus,.jr-editform textarea:focus{outline:none;
+      border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 20%,transparent)}
+    .jr-compose-foot{display:flex;align-items:center;justify-content:space-between;
+      gap:10px;margin-top:9px}
+    .jr-list{display:flex;flex-direction:column;gap:12px}
+    .jr-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+      padding:12px 15px;box-shadow:0 1px 2px rgba(15,18,22,.04);
+      border-left:3px solid color-mix(in srgb,var(--accent) 55%,var(--line))}
+    .jr-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+      font-size:12px;color:var(--muted);margin-bottom:8px}
+    .jr-time{font-weight:600;color:var(--fg);font-variant-numeric:tabular-nums}
+    .jr-edited{font-size:10px;padding:0 6px;border-radius:6px;border:1px solid var(--line)}
+    .jr-created{font-size:11px}
+    .jr-actions{margin-left:auto;display:flex;align-items:center;gap:12px}
+    .jr-link{background:none;border:none;padding:0;cursor:pointer;font-size:12px;
+      color:var(--accent);text-decoration:none;font-family:inherit}
+    .jr-link:hover{text-decoration:underline}
+    .jr-danger{color:var(--crit)}
+    .jr-del{display:inline;margin:0}
+    .jr-body{word-break:break-word;line-height:1.7;font-size:14px}
+    .jr-body > :first-child{margin-top:0}.jr-body > :last-child{margin-bottom:0}
+    .jr-body p{margin:0 0 10px}
+    .jr-body h1,.jr-body h2,.jr-body h3,.jr-body h4{line-height:1.35;margin:16px 0 8px}
+    .jr-body h1{font-size:21px}.jr-body h2{font-size:18px}.jr-body h3{font-size:16px}
+    .jr-body ul,.jr-body ol{margin:7px 0 10px;padding-left:24px}
+    .jr-body li{margin:3px 0}
+    .jr-body blockquote{margin:10px 0;padding:7px 12px;border-left:3px solid var(--accent);
+      background:var(--panel2);color:var(--muted)}
+    .jr-body code{padding:1px 5px;border-radius:5px;background:var(--panel2);
+      font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .jr-body pre{overflow:auto;padding:10px 12px;border-radius:8px;background:var(--panel2)}
+    .jr-body pre code{padding:0;background:none}
+    .jr-body a{color:var(--accent)}
+    .jr-body table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+    .jr-body th,.jr-body td{padding:6px 8px;border:1px solid var(--line);text-align:left}
+    .jr-body th{background:var(--panel2);font-weight:600}
+    .jr-body hr{border:0;border-top:1px solid var(--line);margin:14px 0}
+    .jr-expand{display:none;background:none;border:0;color:var(--accent);padding:6px 0;
+      cursor:pointer;font:12px inherit}
+    .jr-editform{display:none;margin-top:4px}
+    /* 收益日历 */
+    .cal{width:100%;border-collapse:collapse;table-layout:fixed}
+    .cal th{text-align:center;color:var(--muted);font-size:11px;font-weight:500;padding:6px 0}
+    .cal td{border:1px solid var(--line);height:74px;vertical-align:top;padding:5px 6px;
+      border-radius:0}
+    .cal td.empty{background:transparent;border-color:transparent}
+    .cal .d{font-size:11px;color:var(--muted)}
+    .cal .amt{font-size:14px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+    .cal .pc{font-size:11px;margin-top:2px}
+    .cal .flow{font-size:9px;color:var(--warn);margin-top:2px}
+    .cal td.up{background:color-mix(in srgb,var(--profit) 9%,transparent)}
+    .cal td.down{background:color-mix(in srgb,var(--loss) 9%,transparent)}
+    /* 周末休市：灰底填充。放在涨跌之后，交易日不落周末，不会被覆盖到。 */
+    .cal td.weekend{background:color-mix(in srgb,var(--muted) 12%,transparent)}
+    .cal th.weekend{color:var(--muted);opacity:.7}
+    .cal td.future{opacity:.4}
+    .calnav{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+    .calnav .m{font-size:16px;font-weight:600;min-width:130px;text-align:center}
+    /* 年视图：12 个月网格 */
+    .ymonths{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    .ymon{display:block;text-decoration:none;color:var(--fg);
+      background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      padding:12px 14px;min-height:78px;transition:border-color .14s,box-shadow .14s,transform .14s}
+    .ymon:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));
+      box-shadow:0 6px 18px rgba(15,18,22,.10);transform:translateY(-1px)}
+    .ymon.up{background:color-mix(in srgb,var(--profit) 8%,var(--panel))}
+    .ymon.down{background:color-mix(in srgb,var(--loss) 8%,var(--panel))}
+    .ymon.future{opacity:.4}
+    .ym-k{font-size:12px;color:var(--muted)}
+    .ym-amt{font-size:19px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums}
+    .ym-pc{font-size:12px;margin-top:2px;font-variant-numeric:tabular-nums}
+    @media(max-width:640px){.ymonths{grid-template-columns:repeat(2,1fr)}}
+    footer{color:var(--muted);font-size:11px;text-align:center;padding:16px}
+    .mobile-only,.mobile-header,.mobile-bottom-nav,.mobile-sheet{display:none}
+    .mobile-card-list{display:none}
+
+    @media(max-width:768px){
+      html,body{max-width:100%;overflow-x:clip}
+      body{font-size:14px;padding-bottom:calc(68px + env(safe-area-inset-bottom))}
+      header.desktop-header{display:none}
+      .mobile-only{display:block}
+      .mobile-header{height:56px;display:flex;align-items:center;gap:8px;
+        padding:0 12px;border-bottom:1px solid var(--line);background:var(--panel);
+        position:sticky;top:0;z-index:20}
+      .mobile-header .brand{font-size:16px;font-weight:700;color:var(--fg);
+        text-decoration:none;white-space:nowrap;min-height:44px;display:flex;align-items:center}
+      .mobile-header .mobile-health{margin-left:auto;display:flex;align-items:center;
+        gap:6px;color:var(--muted);text-decoration:none;min-height:44px;padding:0 8px}
+      .mobile-header .mobile-health .dot{width:8px;height:8px;border-radius:50%;
+        background:var(--muted)}
+      .mobile-header .mobile-health.ok .dot{background:var(--good)}
+      .mobile-header .mobile-health.warn .dot{background:var(--warn)}
+      .mobile-header .mobile-health.crit .dot{background:var(--crit)}
+      .mobile-icon-btn{min-width:44px;min-height:44px;border:0;background:transparent;
+        color:var(--fg);font:inherit;border-radius:10px;cursor:pointer}
+      .subnav{display:none}
+      main{--page-gutter:14px;padding-top:14px;padding-bottom:12px;min-width:0}
+      footer{padding-bottom:18px;font-size:12px}
+      h1{font-size:22px;line-height:1.35}
+      h2{font-size:17px;line-height:1.4;align-items:flex-start}
+      h2 .h2sub{font-size:12px;margin-left:6px;overflow-wrap:anywhere}
+      .cards.pnl4{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .cards.tight{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .card,.panel{min-width:0}
+      .btn,button,input,select{min-height:44px;font-size:14px}
+      textarea{font-size:16px}
+      .sub,.muted,.flag,.ok,.tag,.sevtag{font-size:12px}
+      a.btn{display:inline-flex;align-items:center;justify-content:center}
+      .why-more .pop{position:fixed;left:14px;right:14px;top:auto;
+        bottom:calc(76px + env(safe-area-inset-bottom));width:auto;max-height:55vh;
+        overflow:auto;font-size:13px;padding:14px;z-index:40}
+      .why-more:not([open]) .pop{display:none}
+      .mobile-bottom-nav{display:grid;grid-template-columns:repeat(4,1fr);
+        position:fixed;left:0;right:0;bottom:0;z-index:25;
+        padding:4px 8px calc(4px + env(safe-area-inset-bottom));
+        background:color-mix(in srgb,var(--panel) 96%,transparent);
+        border-top:1px solid var(--line);box-shadow:0 -4px 18px rgba(0,0,0,.08)}
+      .mobile-bottom-nav a,.mobile-bottom-nav button{height:52px;min-height:52px;
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        gap:1px;color:var(--muted);text-decoration:none;background:transparent;border:0;
+        font-size:12px;line-height:1.2;font-family:inherit;border-radius:10px;cursor:pointer}
+      .mobile-bottom-nav .ico{font-size:18px;line-height:1}
+      .mobile-bottom-nav .active{color:var(--accent);font-weight:700;
+        background:color-mix(in srgb,var(--accent) 10%,transparent)}
+      .mobile-sheet{width:100%;max-width:none;margin:auto 0 0;border:0;
+        border-radius:18px 18px 0 0;background:var(--panel);color:var(--fg);
+        padding:10px 14px calc(20px + env(safe-area-inset-bottom));
+        box-shadow:0 -14px 36px rgba(0,0,0,.25)}
+      .mobile-sheet[open]{display:block}
+      .mobile-sheet::backdrop{background:rgba(0,0,0,.45)}
+      .mobile-sheet-head{display:flex;align-items:center;justify-content:space-between;
+        min-height:44px;font-weight:700}
+      .mobile-menu-links{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+      .mobile-menu-links a,.mobile-menu-links button{min-height:52px;border:1px solid var(--line);
+        background:var(--panel2);color:var(--fg);border-radius:10px;padding:0 12px;
+        display:flex;align-items:center;gap:8px;text-decoration:none;font-size:14px;font-family:inherit}
+      .mobile-menu-links a.active{border-color:var(--accent);color:var(--accent)}
+      .desktop-only{display:none!important}
+      .mobile-card-list{display:flex;flex-direction:column;gap:8px}
+      .mobile-data-card{border:1px solid var(--line);border-radius:11px;background:var(--panel);
+        overflow:hidden;min-width:0}
+      .mobile-data-card>summary{list-style:none;cursor:pointer;padding:12px;
+        min-height:52px;display:block}
+      .mobile-data-card>summary::-webkit-details-marker{display:none}
+      .mobile-data-card[open]>summary{border-bottom:1px solid var(--line)}
+      .mobile-data-card .mobile-card-body{padding:10px 12px}
+      .mobile-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+      .mobile-card-title{font-weight:700;font-size:15px;min-width:0}
+      .mobile-card-value{font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+      .mobile-card-meta{display:flex;align-items:center;justify-content:space-between;
+        gap:8px;margin-top:5px;color:var(--muted);font-size:12px}
+      .mobile-kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;
+        margin:0;font-size:13px}
+      .mobile-kv dt{color:var(--muted);min-width:0}
+      .mobile-kv dd{margin:0;text-align:right;overflow-wrap:anywhere;min-width:0}
+      .mobile-filter-trigger{display:inline-flex;align-items:center;gap:6px;margin-bottom:8px}
+      .mobile-filter-chips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+      .mobile-filter-chips .tag{font-size:12px;padding:4px 8px}
+      .pager a,.rng a{min-width:44px;min-height:44px;display:inline-flex;
+        align-items:center;justify-content:center}
+      .jr-card{min-width:0;padding:12px}
+      .jr-compose-foot{align-items:stretch;flex-direction:column}
+      .jr-compose-foot .btn{width:100%}
+      .jr-actions{width:100%;margin-left:0;justify-content:flex-end;gap:4px}
+      .jr-link{min-width:44px;min-height:44px;display:inline-flex;align-items:center;
+        justify-content:center;padding:0 8px}
+      .jr-body{min-width:0;overflow-wrap:anywhere}
+      .jr-body table{display:block;max-width:100%;overflow-x:auto;white-space:nowrap}
+      .jr-body pre{max-width:100%;overflow-x:auto}
+      .jr-body.is-collapsed{max-height:480px;overflow:hidden;position:relative}
+      .jr-body.is-collapsed::after{content:"";position:absolute;left:0;right:0;bottom:0;
+        height:72px;background:linear-gradient(transparent,var(--panel));pointer-events:none}
+      .jr-expand{display:inline-flex;min-height:44px;align-items:center}
+    }
+  </style>
+</head>
+<body>
+  {% set _htitle = {'ok': '系统正常', 'warn': '系统注意', 'crit': '系统异常'}.get(health_css, '系统状态') %}
+  <header class="desktop-header">
+    <a class="brand" href="/" title="返回概览">小鱼交易台</a>
+    <span class="ro">只读 · 不下单</span>
+    {# 一级导航按使用顺序排列：概览 成交 日记 X推送 简报 收益 风控。
+       多页面分组（收益/风控/更多）走下方 subnav，旧路由全部保留、书签不失效。 #}
+    <nav>
+      <a href="/" class="{{ 'active' if page=='overview' }}">概览</a>
+      <a href="/history" class="{{ 'active' if page=='history' }}">成交</a>
+      <a href="/opportunities" class="{{ 'active' if page=='opportunities' }}">机会</a>
+      <a href="/hyperliquid" class="{{ 'active' if page=='hyperliquid' }}">链上</a>
+      <a href="/journal" class="{{ 'active' if page=='journal' }}">日记</a>
+      <a href="/x" class="{{ 'active' if page=='x' }}">X推送</a>
+      <a href="/briefs" class="{{ 'active' if page=='briefs' }}">简报</a>
+      <a href="/cashflow" class="{{ 'active' if page in ['cashflow','calendar'] }}">收益</a>
+      <a href="/events" class="{{ 'active' if page in ['events','technical','reviews','rules','performance'] }}">风控</a>
+      <a href="/reference" class="navmore {{ 'active' if page in ['reference','replay'] }}"
+         title="口径说明 · 历史重放">⋯</a>
+      <a href="/status" class="{{ 'active' if page=='status' }}" title="{{ _htitle }} · 点击查看能力详情">
+        <span class="health {{ health_css or '' }}"><span class="dot"></span>系统</span>
+      </a>
+      <button type="button" class="themetog" id="themetog"
+              title="切换主题：跟随系统 / 亮色 / 暗色" aria-live="polite">
+        <span class="ticon" id="themeicon">🌓</span><span id="themetext">跟随系统</span>
+      </button>
+    </nav>
+  </header>
+  <header class="mobile-header">
+    <a class="brand" href="/" title="返回概览">小鱼</a>
+    <a class="mobile-health {{ health_css or '' }}" href="/status" title="{{ _htitle }}">
+      <span class="dot"></span><span>状态</span>
+    </a>
+    <button type="button" class="mobile-icon-btn" data-mobile-menu-open aria-label="打开更多菜单">☰</button>
+  </header>
+  {# 二级导航：仅在当前页属于某个多页面分组时出现，展示同组姊妹页。 #}
+  {% set _grouped = ['cashflow','calendar',
+                     'events','technical','reviews','rules','performance','reference','replay'] %}
+  {% if page in _grouped %}
+  <div class="subnav">
+    {% if page in ['cashflow','calendar'] %}
+    <a href="/cashflow" class="{{ 'active' if page=='cashflow' }}">走势</a>
+    <a href="/calendar" class="{{ 'active' if page=='calendar' }}">日历</a>
+    {% elif page in ['events','technical','reviews','rules','performance'] %}
+    <a href="/events" class="{{ 'active' if page=='events' }}">风险事件</a>
+    <a href="/technical" class="{{ 'active' if page=='technical' }}">技术面</a>
+    <a href="/reviews" class="{{ 'active' if page=='reviews' }}">事件复盘</a>
+    <a href="/rules" class="{{ 'active' if page=='rules' }}">触发记录</a>
+    <a href="/performance" class="{{ 'active' if page=='performance' }}">阈值与效果</a>
+    {% elif page in ['reference','replay'] %}
+    <a href="/reference" class="{{ 'active' if page=='reference' }}">口径说明</a>
+    <a href="/replay" class="{{ 'active' if page=='replay' }}">历史重放</a>
+    {% endif %}
+  </div>
+  {% endif %}
+  <main>{% block content %}{% endblock %}</main>
+  <footer>数据仅供个人风控参考 · 与券商 App 若有差异以券商为准</footer>
+  <nav class="mobile-bottom-nav" aria-label="手机主导航">
+    <a href="/" class="{{ 'active' if page=='overview' }}"><span class="ico">⌂</span><span>概览</span></a>
+    <a href="/history" class="{{ 'active' if page=='history' }}"><span class="ico">↔</span><span>成交</span></a>
+    <a href="/events" class="{{ 'active' if page in ['events','technical','reviews','rules','performance'] }}"><span class="ico">⚠</span><span>风控</span></a>
+    <button type="button" data-mobile-menu-open class="{{ 'active' if page in ['journal','x','briefs','cashflow','calendar'] }}"><span class="ico">•••</span><span>更多</span></button>
+  </nav>
+  <dialog class="mobile-sheet" id="mobile-menu" aria-label="更多页面">
+    <div class="mobile-sheet-head"><span>更多</span><button class="mobile-icon-btn" type="button" data-mobile-menu-close aria-label="关闭">✕</button></div>
+    <div class="mobile-menu-links">
+      <a href="/opportunities" class="{{ 'active' if page=='opportunities' }}">◎ 机会</a>
+      <a href="/hyperliquid" class="{{ 'active' if page=='hyperliquid' }}">◈ 链上</a>
+      <a href="/journal" class="{{ 'active' if page=='journal' }}">📝 日记</a>
+      <a href="/x" class="{{ 'active' if page=='x' }}">𝕏 X推送</a>
+      <a href="/briefs" class="{{ 'active' if page=='briefs' }}">☷ 简报</a>
+      <a href="/cashflow" class="{{ 'active' if page in ['cashflow','calendar'] }}">↗ 收益</a>
+      <a href="/status">● 系统状态</a>
+      <button type="button" data-mobile-theme>◐ 切换主题</button>
+    </div>
+  </dialog>
+  <script>
+    (function(){
+      var menu=document.getElementById('mobile-menu');
+      document.querySelectorAll('[data-mobile-menu-open]').forEach(function(btn){
+        btn.addEventListener('click',function(){ if(menu && menu.showModal) menu.showModal(); });
+      });
+      document.querySelectorAll('[data-mobile-menu-close]').forEach(function(btn){
+        btn.addEventListener('click',function(){ if(menu) menu.close(); });
+      });
+      if(menu){ menu.addEventListener('click',function(ev){ if(ev.target===menu) menu.close(); }); }
+      var mobileTheme=document.querySelector('[data-mobile-theme]');
+      if(mobileTheme){ mobileTheme.addEventListener('click',function(){
+        var desktopTheme=document.getElementById('themetog');
+        if(desktopTheme) desktopTheme.click();
+      }); }
+    })();
+    /* 主题三态循环：跟随系统 -> 亮色 -> 暗色 -> 跟随系统。
+       「跟随系统」是有意保留的一档 —— 白天黑夜自动跟着走，
+       多数时候比手动固定更省事；想固定时再点两下即可。 */
+    (function () {
+      var STATES = [
+        { key: null,    icon: "🌓", text: "跟随系统" },
+        { key: "light", icon: "☀️", text: "亮色" },
+        { key: "dark",  icon: "🌙", text: "暗色" }
+      ];
+      var root = document.documentElement;
+      var btn = document.getElementById("themetog");
+      var icon = document.getElementById("themeicon");
+      var text = document.getElementById("themetext");
+      if (!btn) { return; }
+
+      function read() {
+        try { return localStorage.getItem("theme"); } catch (e) { return null; }
+      }
+      function indexOfState(k) {
+        for (var i = 0; i < STATES.length; i++) {
+          if (STATES[i].key === k) { return i; }
+        }
+        return 0;
+      }
+      function paint(i) {
+        var st = STATES[i];
+        icon.textContent = st.icon;
+        text.textContent = st.text;
+        btn.setAttribute("aria-label", "当前主题：" + st.text + "，点击切换");
+      }
+
+      var cur = indexOfState(read() === "light" || read() === "dark"
+                             ? read() : null);
+      paint(cur);
+
+      btn.addEventListener("click", function () {
+        cur = (cur + 1) % STATES.length;
+        var st = STATES[cur];
+        if (st.key) {
+          root.setAttribute("data-theme", st.key);
+        } else {
+          root.removeAttribute("data-theme");   /* 交还给系统偏好 */
+        }
+        try {
+          if (st.key) { localStorage.setItem("theme", st.key); }
+          else { localStorage.removeItem("theme"); }
+        } catch (e) { /* 存不下就只在本页生效，不报错 */ }
+        paint(cur);
+      });
+    })();
+  </script>
+  <script>
+    /* 持仓操作计划：可增删的多行。“+ 添加一条”克隆本 details 内的 <template>，
+       “×”删除所在行；事件委托，天然作用于被点击按钮所属的那张卡片的表单。 */
+    document.addEventListener("click", function (e) {
+      var add = e.target.closest(".pp-act-add");
+      if (add) {
+        var det = add.closest("details");
+        var list = det && det.querySelector(".pp-act-list");
+        var tpl = det && det.querySelector(".pp-act-tpl");
+        if (list && tpl) { list.appendChild(tpl.content.cloneNode(true)); }
+        return;
+      }
+      var del = e.target.closest(".pp-act-del");
+      if (del) {
+        var row = del.closest(".pp-act-row");
+        if (row) { row.remove(); }
+      }
+    });
+  </script>
+</body>
+</html>

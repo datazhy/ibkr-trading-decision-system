@@ -1,0 +1,40 @@
+{% for r in reports %}
+<details class="rpt" {{ 'open' if loop.first and (loaded is not defined or loaded <= 7) }}>
+  <summary>
+    <span class="chev">▶</span><span class="cal">{{ r.day }}</span>
+    <span class="meta">{% if r.top_events %}{{ r.top_events|length }} 事{% endif %}{% if r.topic_heat %} · {{ r.topic_heat|length }} 题{% endif %}</span>
+  </summary>
+  <div class="body">
+    {% if r.tldr %}<div class="sec">📌 今日一句</div><p class="tldr">{{ r.tldr }}</p>{% endif %}
+    {% if r.top_events %}
+    <div class="sec">🔥 三件最重要的事</div>
+    {% for e in r.top_events %}
+    <div class="ev">
+      <div class="t">{{ loop.index }}. {{ e.title or '（无标题）' }}</div>
+      {% if e.what_happened %}<p class="d">发生了什么：{{ e.what_happened }}</p>{% endif %}
+      {% if e.why_it_matters %}<p class="w">为什么重要：{{ e.why_it_matters }}</p>{% endif %}
+      {% if e.authors or e.sources %}
+      <details class="foot"><summary><span class="tg">▶</span>相关博主与原推</summary><div class="line">
+        {% if e.authors %}<span class="aus">{% for a in e.authors %}<a href="https://x.com/{{ a }}" target="_blank" rel="noopener">@{{ a }}</a>{% if not loop.last %}<span class="sep">·</span>{% endif %}{% endfor %}</span>{% endif %}
+        {% if e.sources %}<span class="srcs">{% for s in e.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener">原推{{ s.n }}</a>{% endfor %}</span>{% endif %}
+      </div></details>
+      {% endif %}
+    </div>
+    {% endfor %}{% endif %}
+    {% if r.topic_heat %}<div class="sec">📊 主题热度</div><div class="heat">{% for t in r.topic_heat %}<div class="row"><span class="tp">{{ t.topic }}</span><span class="mt">{{ t.tweet_count }} 条 / {{ t.author_count }} 位 {{ t.trend_label }}</span>{% if t.summary %}<span class="sm">：{{ t.summary }}</span>{% endif %}</div>{% endfor %}</div>{% endif %}
+    {% if r.continuous_signals %}<div class="sec">🔁 连续信号</div><ul class="siglist">{% for s in r.continuous_signals %}<li>{{ s }}</li>{% endfor %}</ul>{% endif %}
+    {% if r.anomaly_signals %}<div class="sec">⚠️ 异常信号</div><ul class="siglist">{% for s in r.anomaly_signals %}<li>{{ s }}</li>{% endfor %}</ul>{% endif %}
+    {% if r.missed_items %}<div class="sec">👀 你可能错过了</div><ul class="siglist">{% for s in r.missed_items %}<li>{{ s }}</li>{% endfor %}</ul>{% endif %}
+    {% if r.noise %}<div class="noise">已折叠噪音：闲聊 {{ r.noise.get('casual') or 0 }} · 重复 {{ r.noise.get('duplicates') or 0 }} · 无新增 {{ r.noise.get('low_information') or 0 }} 条</div>{% endif %}
+    {% if not r.tldr and not r.top_events %}<p class="d" style="margin-top:10px">该日早报内容为空。</p>{% endif %}
+  </div>
+</details>
+{% endfor %}
+{% if report_has_more or (report_has_more is not defined and reports|length == 7) %}
+{% set nloaded = loaded if loaded is defined else 7 %}
+<div class="x-report-more">
+  <a class="btn sec" href="/x?report_limit={{ nloaded + 7 }}"
+     hx-get="/x/reports-fragment?loaded={{ nloaded }}&before_day={{ reports[-1].day|urlencode }}"
+     hx-target="closest .x-report-more" hx-swap="outerHTML">加载更多早报</a>
+</div>
+{% endif %}

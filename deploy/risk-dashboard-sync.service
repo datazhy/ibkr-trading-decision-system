@@ -1,0 +1,32 @@
+# /etc/systemd/system/risk-dashboard-sync.service
+# 数据同步守护进程（Phase 1）。安装：
+#   sudo cp deploy/risk-dashboard-sync.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now risk-dashboard-sync
+#   journalctl -u risk-dashboard-sync -f
+[Unit]
+Description=小鱼交易台 - 数据同步服务 (只读)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 按实际情况修改用户与路径
+User=riskdash
+Group=riskdash
+WorkingDirectory=/opt/risk-dashboard
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/risk-dashboard/.venv/bin/python -m app.service
+Restart=on-failure
+RestartSec=10
+
+# 加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# 允许写入数据与 token 目录
+ReadWritePaths=/opt/risk-dashboard/data /opt/risk-dashboard/secrets
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% from "_plan_form.html" import plan_form %}
+{% block title %}{{ detail.symbol }} 持仓计划 · 小鱼交易台{% endblock %}
+{% block content %}
+<p><a class="pp-link" href="/#position-plans">← 返回当前持仓计划</a></p>
+<h2>{{ detail.symbol }} · 持仓周期 #{{ detail.cycle_number }}
+  <span class="pp-status">{{ detail.status_label }}</span>
+  {% if detail.read_only %}<span class="tag">只读归档</span>{% endif %}</h2>
+
+<div class="panel pp-panel">
+  <dl class="pp-kv">
+    <dt>账户</dt><dd>{{ detail.account }}</dd>
+    <dt>建仓</dt><dd>{{ pp_time(detail.opened_at) }} · {{ '已确认' if detail.opened_at_confidence == 'observed' else '估算' }}</dd>
+    <dt>清仓</dt><dd>{{ pp_time(detail.closed_at) if detail.closed_at else '当前持仓' }}</dd>
+    <dt>当前数量</dt><dd>{{ pp_qty(detail.current_quantity) }} 股</dd>
+    <dt>当前成本</dt><dd>{{ pp_price(detail.current_average_cost) }}</dd>
+    <dt>账户仓位</dt><dd>{{ detail.account_weight_display }} · 最大允许账户仓位 {{ detail.max_weight_display }}</dd>
+    <dt>股票持仓权重</dt><dd>{{ detail.stock_weight_display }}</dd>
+    <dt>计划同步</dt><dd>{{ '已同步' if detail.journal_sync_status == 'SYNCED' else ('待同步' if detail.journal_sync_status == 'PENDING' else ('同步失败' if detail.journal_sync_status == 'FAILED' else '不适用')) }}{% if detail.journal_sync_error %} · {{ detail.journal_sync_error }}{% endif %}</dd>
+  </dl>
+</div>
+
+{% if detail.draft_plan and not detail.read_only %}
+<div class="panel pp-panel">
+  <h3 style="margin-top:0">当前草稿</h3>
+  <p class="muted">草稿可以原地修改，不参与价格/事件触发，也不参与成交纪律判断。</p>
+</div>
+{% endif %}
+
+{% set edit = detail.draft_plan or detail.formal_plan or {} %}
+{% if not detail.read_only %}
+<div class="panel pp-panel">
+  <details {% if detail.draft_plan or plan_error %}open{% endif %}>
+    <summary class="pp-link">{{ '编辑计划草稿' if detail.draft_plan else '创建计划草稿' }}</summary>
+    {{ plan_form('/position-plans/' ~ detail.id ~ '/version', edit, detail,
+                 show_change_reason=True, error=plan_error) }}
+  </details>
+</div>
+{% endif %}
+
+<h2>正式计划版本<span class="h2sub">已发布版本不可覆盖；修改会先生成草稿，再发布新版本</span></h2>
+{% if detail.versions %}
+<div class="pp-grid">
+  {% for version in detail.versions %}
+  <details class="pp-card" {% if loop.first %}open{% endif %}>
+    <summary><span class="pp-summary"><span>版本 {{ version.version }} · {{ pp_time(version.created_at) }}</span><span class="pp-status">{{ version.lifecycle_label }}</span></span></summary>
+    <div class="pp-body">
+      <dl class="pp-kv">
+        <dt>交易类型</dt><dd>{{ version.strategy_type or '—' }}</dd>
+        <dt>当前结论</dt><dd>{{ version.current_conclusion or '—' }}</dd>
+        <dt>购买理由</dt><dd>{{ version.thesis or '—' }}</dd>
+        <dt>为什么现在</dt><dd>{{ version.why_now or '—' }}</dd>
+        <dt>催化剂</dt><dd>{{ version.catalysts or '—' }}</dd>
+        <dt>逻辑失效</dt><dd>{{ version.invalidation_conditions or '—' }}</dd>
+        <dt>下次复盘</dt><dd>{{ pp_time(version.review_at) if version.review_at else '未设置' }}</dd>
+      </dl>
+      {% if version.actions %}
+      <h3>操作计划</h3>
+      {% for action in version.actions %}
+      <div class="disc-row">
+        <span>{{ action.display }}</span>
+        <span class="muted">{{ action.status_label }}</span>
+        {% if action.trigger_evaluation_status == 'BLOCKED' %}
+        <span class="muted">行情门禁：{{ action.trigger_evaluation_note }}</span>
+        {% endif %}
+        {% if action.confirmed_at %}
+        <span class="tag good">已确认执行意图（不等于成交）</span>
+        {% elif not detail.read_only and action.status in ('ACTIVE', 'TRIGGERED') and (action.trigger_type != 'PRICE' or action.status == 'TRIGGERED') %}
+        <form method="post" action="/position-plans/{{ detail.id }}/actions/{{ action.id }}/confirm" style="display:inline;margin-left:8px">
+          <button class="pp-link" type="submit">确认将人工执行</button>
+        </form>
+        {% endif %}
+        {% if not detail.read_only and action.status in ('ACTIVE', 'TRIGGERED') %}
+        <form method="post" action="/position-plans/{{ detail.id }}/actions/{{ action.id }}" style="display:inline;margin-left:8px">
+          <input type="hidden" name="status" value="CANCELED">
+          <button class="pp-link" type="submit">取消</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="muted">仅持有并按指定时间复盘。</p>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% else %}
+<div class="panel"><p class="muted">尚未发布正式计划；当前内容只作为草稿保存。</p></div>
+{% endif %}
+
+<h2>成交与计划匹配<span class="h2sub">无法可靠判断时保持待确认</span></h2>
+{% if detail.events %}
+<div class="panel pp-panel">
+  {% for event in detail.events %}
+  <div class="disc-row">
+    <span>{{ pp_time(event.execution_time) }} · {{ pp_event(event.event_type) }} · {{ pp_qty(event.quantity) }} 股 @ {{ pp_price(event.price) }}</span>
+    <span class="pp-status">{{ pp_match(event.match_status) }}</span>
+    {% if event.deviation_reason %}<span class="muted">{{ event.deviation_reason }}</span>{% endif %}
+    {% if event.confirmed_by_user %}<span class="tag good">已人工确认关联</span>{% endif %}
+    {% if not detail.read_only and event.execution_id and event.match_status in ('PENDING_CONFIRMATION', 'PLAN_OUTSIDE') %}
+    <div style="width:100%;margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      {% if detail.formal_plan and detail.formal_plan.actions %}
+      <form method="post" action="/position-plans/{{ detail.id }}/executions/{{ event.execution_id }}/confirm" style="display:flex;gap:6px">
+        <input type="hidden" name="match_status" value="MATCHED">
+        <select name="action_id" required>
+          <option value="">选择正式操作…</option>
+          {% for action in detail.formal_plan.actions %}
+          {% if action.status in ('ACTIVE', 'TRIGGERED', 'EXECUTED') and ((event.event_type in ('OPEN', 'ADD') and action.action_type == 'ADD') or (event.event_type in ('REDUCE', 'EXIT') and action.action_type in ('REDUCE', 'EXIT'))) %}
+          <option value="{{ action.id }}">{{ action.display }}</option>
+          {% endif %}
+          {% endfor %}
+        </select>
+        <button class="pp-link" type="submit">确认符合计划</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/position-plans/{{ detail.id }}/executions/{{ event.execution_id }}/confirm">
+        <input type="hidden" name="match_status" value="PLAN_OUTSIDE">
+        <input type="hidden" name="deviation_reason" value="用户确认该成交属于计划外执行">
+        <button class="pp-link" type="submit">确认计划外执行</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="panel"><p class="muted">暂无可关联的成交事件；系统会在成交同步后自动尝试匹配。</p></div>
+{% endif %}
+{% endblock %}

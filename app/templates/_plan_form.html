@@ -1,0 +1,79 @@
+{# 持仓计划编辑表单：概览页快速建档与详情页共用同一份字段定义。
+   只暴露四个核心字段；操作计划是可增删的多行，默认折叠、有内容才展开。 #}
+
+{# 单行操作计划：服务端渲染已有行、以及 <template> 里的空白行都用它，保证两边 markup 一致。
+   百分比内部存 0-1，展示时乘 100 还原成用户输入的数值。 #}
+{% macro _act_row(a) %}
+  <div class="pp-act-row" style="display:flex;gap:8px;align-items:center;margin:0 0 7px">
+    <select name="act_type" style="width:88px;flex:none">
+      <option value="ADD" {% if a.action_type == 'ADD' %}selected{% endif %}>加仓</option>
+      <option value="REDUCE" {% if a.action_type == 'REDUCE' %}selected{% endif %}>减仓</option>
+      <option value="EXIT" {% if a.action_type == 'EXIT' %}selected{% endif %}>平仓</option>
+    </select>
+    <input name="act_amount" inputmode="decimal" placeholder="数量" style="width:84px;flex:none"
+      value="{% if a.percentage %}{{ (a.percentage|float * 100)|int }}{% else %}{{ a.quantity or '' }}{% endif %}">
+    <select name="act_unit" style="width:60px;flex:none">
+      <option value="shares" {% if not a.percentage %}selected{% endif %}>股</option>
+      <option value="percent" {% if a.percentage %}selected{% endif %}>%</option>
+    </select>
+    <input name="act_condition" placeholder="触发条件，如 跌到 60" style="flex:1;min-width:0"
+      value="{{ a.event_condition or '' }}">
+    <button type="button" class="pp-act-del" aria-label="删除该行"
+      style="flex:none;width:30px;height:32px;border:0.5px solid var(--border);background:transparent;border-radius:var(--radius);cursor:pointer">×</button>
+  </div>
+{% endmacro %}
+
+{% macro plan_form(action_url, plan, cycle, show_change_reason=False, error=None) %}
+{% set actions = plan.actions or [] %}
+<form class="pp-form" method="post" action="{{ action_url }}">
+  {% if error %}
+  <div class="pp-error full">{{ error.message }}
+    {% if error.limit_exceeded %}
+    <div><button class="btn" name="intent" value="publish_confirm" type="submit">确认超限并发布</button></div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if show_change_reason %}
+  <label class="full">修改原因
+    <select name="change_reason">
+      {% for reason in ('新建持仓周期', '财报变化', '新订单或公告', '市场环境变化',
+                        '股价达到目标', '原判断错误', '仓位变化', '单纯改变主意', '其他') %}
+      <option value="{{ 'NEW_CYCLE' if loop.first else reason }}"
+        {% if plan.change_reason == ('NEW_CYCLE' if loop.first else reason) %}selected{% endif %}>{{ reason }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  {# 极简持仓计划：入场只手填论点 / 证伪 / 仓位纪律 / 复盘时间四项，
+     其余状态（当前结论、持有期、盈亏、距止损）由看板自动计算，不再让用户填。 #}
+  <label class="full">核心购买理由
+    <textarea name="thesis" maxlength="10000" rows="2"
+      placeholder="一句话讲清为什么持有，建议写成可验证的判断">{{ plan.thesis or '' }}</textarea></label>
+  <label class="full"><span>投资逻辑失效条件 <span class="muted" style="font-size:11px">· 发布前必填</span></span>
+    <textarea name="invalidation_conditions" maxlength="10000" rows="2"
+      placeholder="发生什么就承认判断错、必须减/离场，如：连续两次发射失败">{{ plan.invalidation_conditions or '' }}</textarea></label>
+  <label>最大允许账户仓位
+    <input name="max_weight" inputmode="decimal" placeholder="例如 0.30"
+      value="{{ plan.max_weight or cycle.max_weight or '' }}"></label>
+  <label>下次复盘时间
+    <input name="review_at" type="datetime-local" value="{{ pp_input_time(plan.review_at) }}">
+    <span class="muted" style="font-size:11px">留空则自动设定</span></label>
+
+  {# 操作计划：可增删的多行，每行 加仓/减仓/平仓 + 数量 + 触发条件。
+     “+ 添加一条”克隆下面的 <template>，“×”删除该行；交互见 base.html 的 JS。 #}
+  <details class="full"{% if actions %} open{% endif %}>
+    <summary class="pp-link">操作计划（可选）</summary>
+    <div class="pp-act-list" style="margin-top:7px">
+      {% for a in actions %}{{ _act_row(a) }}{% endfor %}
+    </div>
+    <template class="pp-act-tpl">{{ _act_row({}) }}</template>
+    <button type="button" class="pp-link pp-act-add"
+      style="background:none;border:0;padding:0;cursor:pointer">+ 添加一条</button>
+  </details>
+
+  <div class="full">
+    <button class="btn" name="intent" value="draft" type="submit">保存草稿</button>
+    <button class="btn" name="intent" value="publish" type="submit">发布正式计划</button>
+  </div>
+</form>
+{% endmacro %}

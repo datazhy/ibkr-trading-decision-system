@@ -1,0 +1,36 @@
+{% for day, items in feed.days %}
+  <div class="dh">
+    <span class="d">{{ day }}</span><span class="n">{{ items|length }} 条</span>
+  </div>
+  {% for t in items %}
+  <article class="tw">
+    <div class="hd">
+      <span class="av">{{ t.handle[:2] }}</span>
+      <span class="nm">{{ t.name }}</span>
+      <span class="hl">@{{ t.handle }}</span>
+      <span class="tm">{{ t.published_bj }}</span>
+    </div>
+    <div class="bd">{{ t.content }}</div>
+    {% if t.ai_summary %}<div class="sm"><b>AI 分析</b>{{ t.ai_summary }}</div>{% endif %}
+    {% if t.translated and t.has_original %}
+    <details class="orig"><summary>▸ 查看英文原文</summary><div class="o">{{ t.original }}</div></details>
+    {% endif %}
+    <div class="ft">
+      {% if t.translated %}<span class="tag zh">中文版</span>
+      {% else %}<span class="tag raw">原文 · 无中文版</span>{% endif %}
+      {% if t.media_count %}<span class="tag">图/视频 {{ t.media_count }}</span>{% endif %}
+      {% if t.is_reply %}<span class="tag">回复</span>{% endif %}
+      {% if t.is_quote %}<span class="tag">引用</span>{% endif %}
+      {% if t.url %}<a class="go" href="{{ t.url }}" target="_blank" rel="noopener noreferrer">在 X 打开 ↗</a>{% endif %}
+    </div>
+  </article>
+  {% endfor %}
+{% endfor %}
+{% if feed.has_more and feed.next_before %}
+{% set nloaded = loaded if loaded is defined else feed.total %}
+<div class="x-load-more">
+  <a class="btn sec" href="/x?days={{ feed.window_days }}&feed_limit={{ nloaded + 30 }}{% if feed.handle %}&handle={{ feed.handle|urlencode }}{% endif %}"
+     hx-get="/x/feed-fragment?days={{ feed.window_days }}&loaded={{ nloaded }}&before={{ feed.next_before|urlencode }}&before_id={{ feed.next_before_id|urlencode }}{% if feed.handle %}&handle={{ feed.handle|urlencode }}{% endif %}"
+     hx-target="closest .x-load-more" hx-swap="outerHTML">加载更多推文</a>
+</div>
+{% endif %}

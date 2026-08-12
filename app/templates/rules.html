@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}规则日志 · 小鱼交易台{% endblock %}
+{% block content %}
+<h2>规则触发日志</h2>
+
+{# 最近一次规则运行状态：区分 从未运行/无触发/数据不足/过期/异常 #}
+<div class="banner-run {{ run.css }}">
+  <strong>{{ run.label }}</strong>
+  <span class="muted">· {{ run.detail }}</span>
+  {% if run.account_ready is not none and not run.account_ready %}
+    <span class="flag">· 账户数据未就绪</span>
+  {% endif %}
+</div>
+
+{% if run.summary %}
+<div class="cards" style="margin-bottom:14px">
+  <div class="card"><div class="k">触发</div>
+    <div class="v {{ 'down' if run.summary.triggered }}">{{ run.summary.triggered }}</div></div>
+  <div class="card"><div class="k">正常</div>
+    <div class="v ok">{{ run.summary.ok }}</div></div>
+  <div class="card"><div class="k">未判定</div>
+    <div class="v {{ 'down' if run.summary.not_evaluated }}">{{ run.summary.not_evaluated }}</div>
+    <div class="sub">行情质量不足 / 数据不足，非「无风险」</div></div>
+  <div class="card"><div class="k">异常</div>
+    <div class="v {{ 'down' if run.summary.error }}">{{ run.summary.error }}</div></div>
+</div>
+{% endif %}
+
+{% if run.per_symbol and run.per_symbol.R7 %}
+<div class="panel scroll" style="margin-bottom:14px">
+  <p class="muted" style="margin:0 0 8px">R7 逐标的判定情况：</p>
+  <table>
+    <thead><tr><th>标的</th><th>状态</th><th>原因</th></tr></thead>
+    <tbody>
+    {% for r in run.per_symbol.R7 %}
+      <tr>
+        <td>{{ r.symbol }}</td>
+        <td>{% if r.status == 'TRIGGERED' %}<span class="down">触发</span>
+            {% elif r.status == 'OK' %}<span class="ok">已判定 · 未触及</span>
+            {% elif r.status == 'NOT_EVALUATED' %}<span class="flag">未判定</span>
+            {% elif r.status == 'NO_STOP_LEVEL' %}<span class="muted">无止损位</span>
+            {% else %}<span class="flag">{{ r.status }}</span>{% endif %}</td>
+        <td style="text-align:left;white-space:normal" class="muted">{{ r.reason }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if run.rules %}
+<div class="panel scroll" style="margin-bottom:14px">
+  <p class="muted" style="margin:0 0 8px">
+    本次评估各规则状态 · 所用数据快照：
+    持仓 {{ run.positions_snapshot_abs }}
+    · 余额 {{ run.balances_snapshot_abs }}
+    · 行情 {{ run.quotes_abs }}
+    {% if run.sync_run_id %}· 批次 {{ run.sync_run_id[:8] }}{% endif %}
+    {% if run.quote_summary %}<br>行情质量：{{ run.quote_summary }}{% endif %}
+  </p>
+  <table>
+    <thead><tr><th>规则</th><th>状态</th><th>evidence</th></tr></thead>
+    <tbody>
+    {% for r in run.rules %}
+      <tr>
+        <td><span class="tag">{{ r.rule }}</span></td>
+        <td>{% if r.status=='TRIGGERED' %}<span class="down">触发 ({{ r.hits }})</span>
+            {% elif r.status=='OK' %}<span class="ok">正常</span>
+            {% elif r.status=='SKIPPED' %}<span class="muted">跳过</span>
+            {% elif r.status=='ERROR' %}<span class="down">异常</span>
+            {% elif r.status=='NOT_EVALUATED' %}<span class="flag">未判定</span>
+            {% elif r.status=='INSUFFICIENT_DATA' %}<span class="flag">数据不足</span>
+            {% elif r.status=='STALE_DATA' %}<span class="flag">行情过期</span>
+            {% else %}<span class="flag">{{ r.status }}</span>{% endif %}</td>
+        <td style="text-align:left;white-space:normal" class="muted">{{ r.detail }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if alerts %}
+<h2>持续告警</h2>
+<div class="panel scroll" style="margin-bottom:14px">
+  <table>
+    <thead><tr><th>规则</th><th>标的</th><th>提醒</th><th>首次触发</th><th>最近确认</th><th>持续</th><th>次数</th></tr></thead>
+    <tbody>
+    {% for a in alerts %}
+      <tr>
+        <td><span class="tag {{ 'crit' if a.severity=='CRIT' else 'warn' }}">{{ a.rule_id }}</span></td>
+        <td>{{ a.symbol or '-' }}</td>
+        <td style="text-align:left;white-space:normal">{{ a.title }}</td>
+        <td>{{ a.first_abs }}</td>
+        <td>{{ a.last_abs }}<br><span class="muted" style="font-size:11px">{{ a.last_rel }}</span></td>
+        <td>{{ a.duration }}</td>
+        <td>{{ a.count }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<h2>推送记录</h2>
+<p class="muted">下方为所有实际推送过的风控提醒（R1–R7），按 UTC 时间戳倒序，最新在上。</p>
+<div class="panel scroll">
+  {% if events %}
+  <table>
+    <thead><tr>
+      <th>时间</th><th>规则</th><th>标的</th><th>提醒</th>
+    </tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td>{{ e.time }}<br><span class="muted" style="font-size:11px">{{ e.rel }}</span></td>
+        <td><span class="tag {{ 'crit' if e.severity=='CRIT' else 'warn' }}">{{ e.rule_id }}</span></td>
+        <td>{{ e.symbol or '-' }}</td>
+        <td style="text-align:left;white-space:normal">{{ e.title }}<br><span class="muted">{{ e.message }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">
+    {% if run.state == 'NEVER_RUN' %}规则引擎尚未运行——请确认同步服务已启动。
+    {% elif run.state == 'INSUFFICIENT_DATA' %}本次评估因数据不足未完整判定，暂无推送记录（非“无风险”）。
+    {% elif run.state == 'STALE_DATA' %}行情过期，部分规则未判定，暂无推送记录（非"无风险"）。
+    {% elif run.state == 'NOT_EVALUATED' %}行情质量不足（如仅有收盘冻结价），相关规则未执行判断，暂无推送记录（非"无风险"）。
+    {% elif run.state == 'ERROR' %}规则运行异常，请检查日志；暂无推送记录。
+    {% else %}规则已正常评估，本阶段无触发。{% endif %}
+  </p>
+  {% endif %}
+</div>
+{% endblock %}
