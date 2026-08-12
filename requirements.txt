@@ -10,7 +10,7 @@ websockets>=12.0
 lz4>=4.3.3             # Hyperliquid asset_ctxs archive support
 boto3>=1.35.0          # Read-only requester-pays archive access
 apprise>=1.8.0
-python-dotenv>=1.0.1
+python-dotenv>=1.2.2
 tzdata>=2024.1
 cryptography>=42.0.0
 futu-api==10.9.6908   # Quotes only; account truth remains in IBKR
